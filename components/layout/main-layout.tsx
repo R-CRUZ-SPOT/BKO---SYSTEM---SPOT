@@ -160,9 +160,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen bg-zinc-50 text-zinc-900 antialiased overflow-hidden">
+    <div className="flex h-screen bg-zinc-50 text-zinc-900 antialiased overflow-hidden print:h-auto print:overflow-visible print:bg-white print:block">
       {/* Sidebar - Desktop */}
-      <aside className="w-72 flex-shrink-0 hidden lg:flex">
+      <aside className="w-72 flex-shrink-0 hidden lg:flex print:hidden">
         <SidebarContent navItems={navItems} user={user} profile={profile} signOut={signOut} />
       </aside>
 
@@ -205,9 +205,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       </AnimatePresence>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      <div className="flex-1 flex flex-col min-w-0 relative print:block print:w-full">
         {/* Header */}
-        <header className="h-16 lg:h-20 bg-white/80 backdrop-blur-md border-b border-zinc-200 px-4 lg:px-8 flex items-center justify-between sticky top-0 z-30">
+        <header className="h-16 lg:h-20 bg-white/80 backdrop-blur-md border-b border-zinc-200 px-4 lg:px-8 flex items-center justify-between sticky top-0 z-30 print:hidden">
           <div className="flex items-center gap-4">
             <Button 
               variant="ghost" 
@@ -236,11 +236,11 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 custom-scrollbar relative">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 custom-scrollbar relative print:overflow-visible print:p-0 print:m-0 print:block">
           {/* Subtle background element */}
-          <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -mr-48 -mt-48" />
+          <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -mr-48 -mt-48 print:hidden" />
           
-          <div className="max-w-7xl mx-auto relative">
+          <div className="max-w-7xl mx-auto relative print:max-w-none print:w-full">
             {children}
           </div>
         </main>

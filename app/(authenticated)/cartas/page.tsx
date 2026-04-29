@@ -460,25 +460,16 @@ export default function CartasPage() {
 
       </div>
 
-      <style jsx global>{`
+      <style dangerouslySetInnerHTML={{__html: `
         @media print {
-          body * {
-            visibility: hidden;
+          @page { size: portrait; margin: 15mm; }
+          html, body {
+            background-color: white !important;
+            height: auto !important;
+            overflow: visible !important;
           }
-          #print-section, #print-section * {
-            visibility: visible;
-          }
-          #print-section {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          @page { size: auto; margin: 15mm; }
         }
-      `}</style>
+      `}} />
     </div>
   );
 }
