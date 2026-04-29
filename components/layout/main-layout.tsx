@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import Link from 'next/link';
-import { LayoutDashboard, Users, Smartphone, Phone, LogOut, Settings, Menu, X, Cake, Ticket } from 'lucide-react';
+import { LayoutDashboard, Users, Smartphone, Phone, LogOut, Settings, Menu, X, Cake, Ticket, FileText } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -152,6 +152,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     { name: 'Inventário de Celulares', href: '/aparelhos', icon: Smartphone },
     { name: 'Controle de Linhas', href: '/linhas', icon: Phone },
     { name: 'Gestão de Vouchers', href: '/vouchers', icon: Ticket },
+    { name: 'Cartas de Apresentação', href: '/cartas', icon: FileText },
   ];
 
   if (profile?.role === 'ADMIN') {

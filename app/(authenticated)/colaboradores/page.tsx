@@ -33,6 +33,10 @@ export default function ColaboradoresPage() {
   const [newCargo, setNewCargo] = useState('');
   const [newJob, setNewJob] = useState('');
   const [newDataNascimento, setNewDataNascimento] = useState('');
+  const [newCpf, setNewCpf] = useState('');
+  const [newRg, setNewRg] = useState('');
+  const [newCtps, setNewCtps] = useState('');
+  const [newSerieCtps, setNewSerieCtps] = useState('');
   const [newAvatarFile, setNewAvatarFile] = useState<File | null>(null);
   const [newAvatarPreview, setNewAvatarPreview] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -46,6 +50,10 @@ export default function ColaboradoresPage() {
   const [editCargo, setEditCargo] = useState('');
   const [editJob, setEditJob] = useState('');
   const [editDataNascimento, setEditDataNascimento] = useState('');
+  const [editCpf, setEditCpf] = useState('');
+  const [editRg, setEditRg] = useState('');
+  const [editCtps, setEditCtps] = useState('');
+  const [editSerieCtps, setEditSerieCtps] = useState('');
   const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
   const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -206,26 +214,64 @@ export default function ColaboradoresPage() {
           return null;
         };
 
-        // Validar e formatar dados
-        const formattedData = data.map((row: any) => ({
-          matricula: row.MATRICULA?.toString(),
-          nome: row.NOME,
-          email: row.EMAIL || null,
-          data_admissao: parseImportDate(row.ADMISSAO),
-          job: row.JOB || null,
-          cargo: row.CARGO || null,
-          data_nascimento: parseImportDate(row['DATA NASCIMENTO']),
-        })).filter(row => row.matricula && row.nome); // Campos obrigatórios
+        // Helper para mapear valores de colunas de forma mais flexível (case insensitive e múltiplas opções)
+        const getColValue = (row: any, possibleNames: string[]) => {
+          for (const key of Object.keys(row)) {
+            if (possibleNames.includes(key.trim().toUpperCase())) {
+              return row[key] === '' ? null : row[key];
+            }
+          }
+          return null;
+        };
+
+        // Extrai todos os cabeçalhos para saber quais campos estão presentes no arquivo
+        const allKeys = new Set<string>();
+        data.forEach((row: any) => {
+          Object.keys(row).forEach(k => allKeys.add(k.trim().toUpperCase()));
+        });
+        const headers = Array.from(allKeys);
+
+        const hasField = (possibleNames: string[]) => headers.some(h => possibleNames.includes(h));
+
+        const hasEmail = hasField(['EMAIL', 'E-MAIL']);
+        const hasAdmissao = hasField(['ADMISSAO', 'ADMISSÃO', 'DATA_ADMISSAO', 'DATA ADMISSAO', 'DATA DE ADMISSAO', 'DATA DE ADMISSÃO']);
+        const hasJob = hasField(['JOB']);
+        const hasCargo = hasField(['CARGO']);
+        const hasNascimento = hasField(['NASCIMENTO', 'DATA_NASCIMENTO', 'DATA NASCIMENTO', 'DATA DE NASCIMENTO']);
+        const hasCpf = hasField(['CPF']);
+        const hasRg = hasField(['RG', 'NUM RG', 'NUMERO RG', 'NÚMERO RG', 'NUM. RG']);
+        const hasCtps = hasField(['CTPS', 'NUM CTPS', 'NUMERO CTPS', 'NÚMERO CTPS', 'NUM. CTPS']);
+        const hasSerieCtps = hasField(['SERIE CTPS', 'SÉRIE CTPS', 'SERIE_CTPS', 'SERIE', 'SÉRIE']);
+
+        // Validar e formatar dados (apenas injeta a coluna no objeto se a planilha tem a coluna correspondente)
+        const formattedData = data.map((row: any) => {
+          const obj: any = {};
+          
+          obj.matricula = getColValue(row, ['MATRICULA', 'MATRÍCULA'])?.toString();
+          obj.nome = getColValue(row, ['NOME', 'COLABORADOR']);
+          
+          if (hasEmail) obj.email = getColValue(row, ['EMAIL', 'E-MAIL']) || null;
+          if (hasAdmissao) obj.data_admissao = parseImportDate(getColValue(row, ['ADMISSAO', 'ADMISSÃO', 'DATA_ADMISSAO', 'DATA ADMISSAO', 'DATA DE ADMISSAO', 'DATA DE ADMISSÃO']));
+          if (hasJob) obj.job = getColValue(row, ['JOB']) || null;
+          if (hasCargo) obj.cargo = getColValue(row, ['CARGO']) || null;
+          if (hasNascimento) obj.data_nascimento = parseImportDate(getColValue(row, ['NASCIMENTO', 'DATA_NASCIMENTO', 'DATA NASCIMENTO', 'DATA DE NASCIMENTO']));
+          if (hasCpf) obj.cpf = getColValue(row, ['CPF'])?.toString() || null;
+          if (hasRg) obj.rg = getColValue(row, ['RG', 'NUM RG', 'NUMERO RG', 'NÚMERO RG', 'NUM. RG'])?.toString() || null;
+          if (hasCtps) obj.ctps = getColValue(row, ['CTPS', 'NUM CTPS', 'NUMERO CTPS', 'NÚMERO CTPS', 'NUM. CTPS'])?.toString() || null;
+          if (hasSerieCtps) obj.serie_ctps = getColValue(row, ['SERIE CTPS', 'SÉRIE CTPS', 'SERIE_CTPS', 'SERIE', 'SÉRIE'])?.toString() || null;
+
+          return obj;
+        }).filter((row: any) => row.matricula && row.nome); // Campos obrigatórios
 
         if (formattedData.length === 0) {
           toast.error('Nenhum dado válido encontrado.');
           return;
         }
 
-        // Tenta fazer o insert on conflict ignore (como o Supabase data API não suporta ignore nativo, vamos fazer upsert)
+        // Realiza o upsert (insert ou update) com base na matricula
         const { error } = await supabase
           .from('colaboradores')
-          .upsert(formattedData, { onConflict: 'matricula', ignoreDuplicates: true });
+          .upsert(formattedData, { onConflict: 'matricula', ignoreDuplicates: false });
 
         if (error) throw error;
         
@@ -317,6 +363,10 @@ export default function ColaboradoresPage() {
            cargo: newCargo || null, 
            job: newJob || null,
            data_nascimento: newDataNascimento || null,
+           cpf: newCpf || null,
+           rg: newRg || null,
+           ctps: newCtps || null,
+           serie_ctps: newSerieCtps || null,
            foto_url: fotoUrl
         }]);
         
@@ -335,6 +385,10 @@ export default function ColaboradoresPage() {
       setNewCargo('');
       setNewJob('');
       setNewDataNascimento('');
+      setNewCpf('');
+      setNewRg('');
+      setNewCtps('');
+      setNewSerieCtps('');
       setNewAvatarFile(null);
       setNewAvatarPreview(null);
       dataCache.invalidate('colaboradores');
@@ -371,6 +425,10 @@ export default function ColaboradoresPage() {
           cargo: editCargo || null,
           job: editJob || null,
           data_nascimento: editDataNascimento || null,
+          cpf: editCpf || null,
+          rg: editRg || null,
+          ctps: editCtps || null,
+          serie_ctps: editSerieCtps || null,
           foto_url: fotoUrl
         })
         .eq('id', editingColaborador.id);
@@ -434,6 +492,10 @@ export default function ColaboradoresPage() {
     setEditCargo(colaborador.cargo || '');
     setEditJob(colaborador.job || '');
     setEditDataNascimento(colaborador.data_nascimento || '');
+    setEditCpf(colaborador.cpf || '');
+    setEditRg(colaborador.rg || '');
+    setEditCtps(colaborador.ctps || '');
+    setEditSerieCtps(colaborador.serie_ctps || '');
     setEditAvatarFile(null);
     setEditAvatarPreview(colaborador.foto_url || null);
     setIsEditDialogOpen(true);
@@ -579,13 +641,53 @@ export default function ColaboradoresPage() {
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Data de Nascimento</label>
-              <Input 
-                type="date"
-                value={newDataNascimento} 
-                onChange={e => setNewDataNascimento(e.target.value)} 
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Data de Nascimento</label>
+                <Input 
+                  type="date"
+                  value={newDataNascimento} 
+                  onChange={e => setNewDataNascimento(e.target.value)} 
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">CPF</label>
+                <Input 
+                  value={newCpf} 
+                  onChange={e => setNewCpf(e.target.value)} 
+                  placeholder="Ex: 000.000.000-00"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">RG</label>
+                <Input 
+                  value={newRg} 
+                  onChange={e => setNewRg(e.target.value)} 
+                  placeholder="Ex: 00.000.000-0"
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">CTPS (Número)</label>
+                <Input 
+                  value={newCtps} 
+                  onChange={e => setNewCtps(e.target.value)} 
+                  placeholder="Ex: 1234567"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">CTPS (Série)</label>
+                <Input 
+                  value={newSerieCtps} 
+                  onChange={e => setNewSerieCtps(e.target.value)} 
+                  placeholder="Ex: 001-SP"
+                />
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -681,13 +783,53 @@ export default function ColaboradoresPage() {
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Data de Nascimento</label>
-              <Input 
-                type="date"
-                value={editDataNascimento} 
-                onChange={e => setEditDataNascimento(e.target.value)} 
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Data de Nascimento</label>
+                <Input 
+                  type="date"
+                  value={editDataNascimento} 
+                  onChange={e => setEditDataNascimento(e.target.value)} 
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">CPF</label>
+                <Input 
+                  value={editCpf} 
+                  onChange={e => setEditCpf(e.target.value)} 
+                  placeholder="Ex: 000.000.000-00"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">RG</label>
+                <Input 
+                  value={editRg} 
+                  onChange={e => setEditRg(e.target.value)} 
+                  placeholder="Ex: 00.000.000-0"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">CTPS (Número)</label>
+                <Input 
+                  value={editCtps} 
+                  onChange={e => setEditCtps(e.target.value)} 
+                  placeholder="Ex: 1234567"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">CTPS (Série)</label>
+                <Input 
+                  value={editSerieCtps} 
+                  onChange={e => setEditSerieCtps(e.target.value)} 
+                  placeholder="Ex: 001-SP"
+                />
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
