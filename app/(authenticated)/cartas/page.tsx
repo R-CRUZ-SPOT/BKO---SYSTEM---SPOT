@@ -342,6 +342,7 @@ export default function CartasPage() {
                 </div>
               ) : (
                 <motion.div 
+                  id="print-section"
                   ref={printRef}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -464,18 +465,18 @@ export default function CartasPage() {
           body * {
             visibility: hidden;
           }
-          .print\\:w-full * {
+          #print-section, #print-section * {
             visibility: visible;
           }
-          .print\\:block, .print\\:w-full {
-             position: absolute !important;
-             left: 0 !important;
-             top: 0 !important;
-             width: 100% !important;
-             margin: 0 !important;
-             padding: 0 !important;
+          #print-section {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
-          @page { size: auto;  margin: 15mm; }
+          @page { size: auto; margin: 15mm; }
         }
       `}</style>
     </div>
