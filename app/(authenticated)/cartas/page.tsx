@@ -37,7 +37,7 @@ export default function CartasPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [roteiro, setRoteiro] = useState<RoteiroEntry[]>([]);
   const [selectedColaboradorId, setSelectedColaboradorId] = useState<string>('');
-  const [selectedLojaId, setSelectedLojaId] = useState<string>('');
+  const [selectedLojaIds, setSelectedLojaIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [fileName, setFileName] = useState('');
   
@@ -74,7 +74,7 @@ export default function CartasPage() {
     setFileName(file.name);
     setCartaGerada(false);
     setSelectedColaboradorId('');
-    setSelectedLojaId('');
+    setSelectedLojaIds([]);
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -146,25 +146,25 @@ export default function CartasPage() {
       });
 
       setLojasVinculadas(Array.from(uniqueLojas.values()));
-      setSelectedLojaId('');
+      setSelectedLojaIds([]);
       setCartaGerada(false);
     } else {
       setLojasVinculadas([]);
-      setSelectedLojaId('');
+      setSelectedLojaIds([]);
       setCartaGerada(false);
     }
   }, [selectedColaboradorId, roteiro, colaboradores]);
 
   const handleGerarCarta = () => {
-    if (!selectedColaboradorId || !selectedLojaId) {
-      alert("Por favor selecione um colaborador e uma loja.");
+    if (!selectedColaboradorId || selectedLojaIds.length === 0) {
+      alert("Por favor selecione um colaborador e ao menos uma loja.");
       return;
     }
     setCartaGerada(true);
   };
 
   const selectedColab = colaboradores.find(c => c.id === selectedColaboradorId);
-  const selectedLoja = lojasVinculadas.find(l => l.id === selectedLojaId);
+  const selectedLojas = lojasVinculadas.filter(l => selectedLojaIds.includes(l.id));
 
   const getFormatDate = () => {
     const months = [
@@ -266,30 +266,61 @@ export default function CartasPage() {
 
               <div>
                 <label className="block text-xs font-bold text-zinc-700 uppercase tracking-tighter mb-2 flex justify-between items-center">
-                  <span>Loja (Do Roteiro)</span>
+                  <span>Lojas (Roteiro)</span>
                   {lojasVinculadas.length > 0 && (
                     <span className="text-[10px] text-emerald-600 font-bold px-2 py-0.5 bg-emerald-50 rounded-full">
                       {lojasVinculadas.length} encontradas
                     </span>
                   )}
                 </label>
-                <div className="relative">
-                  <select
-                    value={selectedLojaId}
-                    onChange={(e) => setSelectedLojaId(e.target.value)}
-                    className="w-full h-11 pl-4 pr-10 bg-zinc-50 border border-zinc-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 appearance-none"
-                    disabled={!selectedColaboradorId || lojasVinculadas.length === 0}
-                  >
-                    <option value="">
-                      {!selectedColaboradorId 
-                        ? 'Selecione um promotor primeiro...' 
-                        : (lojasVinculadas.length === 0 ? 'Nenhuma loja encontrada' : 'Selecione a loja...')}
-                    </option>
-                    {lojasVinculadas.map(l => (
-                      <option key={l.id} value={l.id}>{l.rede} - {l.nomFantasia}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
+                
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar border border-zinc-200 rounded-xl p-3 bg-zinc-50">
+                  {!selectedColaboradorId ? (
+                    <p className="text-xs text-zinc-400 italic">Selecione um promotor primeiro...</p>
+                  ) : lojasVinculadas.length === 0 ? (
+                    <p className="text-xs text-zinc-400 italic">Nenhuma loja encontrada</p>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 pb-2 mb-2 border-b border-zinc-200">
+                        <input
+                          type="checkbox"
+                          id="select-all-lojas"
+                          checked={selectedLojaIds.length === lojasVinculadas.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedLojaIds(lojasVinculadas.map(l => l.id));
+                            } else {
+                              setSelectedLojaIds([]);
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <label htmlFor="select-all-lojas" className="text-xs font-bold text-zinc-600 uppercase cursor-pointer">
+                          Selecionar Todas
+                        </label>
+                      </div>
+                      {lojasVinculadas.map(l => (
+                        <div key={l.id} className="flex items-center gap-2 hover:bg-zinc-100 p-1 rounded transition-colors">
+                          <input
+                            type="checkbox"
+                            id={`loja-${l.id}`}
+                            checked={selectedLojaIds.includes(l.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedLojaIds([...selectedLojaIds, l.id]);
+                              } else {
+                                setSelectedLojaIds(selectedLojaIds.filter(id => id !== l.id));
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <label htmlFor={`loja-${l.id}`} className="text-sm font-medium text-zinc-700 cursor-pointer flex-1 line-clamp-1">
+                            {l.rede} - {l.nomFantasia}
+                          </label>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
                 
                 {selectedColaboradorId && lojasVinculadas.length === 0 && (
@@ -302,10 +333,10 @@ export default function CartasPage() {
               <div className="pt-4 border-t border-zinc-100">
                 <Button 
                   onClick={handleGerarCarta}
-                  disabled={!selectedColaboradorId || !selectedLojaId}
+                  disabled={!selectedColaboradorId || selectedLojaIds.length === 0}
                   className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold h-11 rounded-xl uppercase tracking-wider text-xs"
                 >
-                  Gerar Carta
+                  Gerar {selectedLojaIds.length > 1 ? `${selectedLojaIds.length} Cartas` : 'Carta'}
                 </Button>
               </div>
             </div>
@@ -338,120 +369,124 @@ export default function CartasPage() {
                 <div className="text-center mt-32 opacity-40 select-none print:hidden">
                   <FileText className="w-20 h-20 mx-auto text-zinc-300 mb-4" />
                   <p className="text-lg font-bold text-zinc-400">Nenhuma carta gerada</p>
-                  <p className="text-sm font-medium text-zinc-400 mt-1">Preencha os dados e clique em "Gerar Carta" para ver a prévia.</p>
+                  <p className="text-sm font-medium text-zinc-400 mt-1">Preencha os dados e clique em &quot;Gerar Carta&quot; para ver a prévia.</p>
                 </div>
               ) : (
-                <motion.div 
-                  id="print-section"
-                  ref={printRef}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white w-[210mm] min-h-[297mm] shadow-xl p-[40px] md:p-[80px] print:w-full print:min-h-0 print:shadow-none print:p-0 print:m-0 font-sans text-black relative"
-                >
-                  
-                  {/* Header: Date and Logo */}
-                  <div className="flex justify-between items-start mb-16">
-                    <div className="pt-8">
-                      <p className="text-[14px]">São Paulo, {getFormatDate()}</p>
-                    </div>
-                    
-                    {/* SPOT Logo Simulator */}
-                    <div className="grid grid-cols-4 gap-[6px]">
-                      {/* Row 1 */}
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                <div className="flex flex-col gap-8 print:gap-0 print:block">
+                  {selectedLojas.map((loja, index) => (
+                    <motion.div 
+                      key={loja.id}
+                      id={`print-section-${index}`}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`bg-white w-[210mm] min-h-[297mm] shadow-xl p-[40px] md:p-[80px] print:w-full print:shadow-none print:p-[15mm] print:m-0 font-sans text-black relative ${index > 0 ? 'page-break' : ''}`}
+                    >
                       
-                      {/* Row 2 */}
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
-                        <span className="text-[10px] font-bold text-white leading-none">S</span>
+                      {/* Header: Date and Logo */}
+                      <div className="flex justify-between items-start mb-16">
+                        <div className="pt-8">
+                          <p className="text-[14px]">São Paulo, {getFormatDate()}</p>
+                        </div>
+                        
+                        {/* SPOT Logo Simulator */}
+                        <div className="grid grid-cols-4 gap-[6px]">
+                          {/* Row 1 */}
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                          
+                          {/* Row 2 */}
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
+                            <span className="text-[10px] font-bold text-white leading-none">S</span>
+                          </div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
+                            <span className="text-[10px] font-bold text-white leading-none">P</span>
+                          </div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-red-600 to-red-800 shadow-sm border border-red-900 flex items-center justify-center">
+                            {/* Red circle */}
+                          </div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
+                            <span className="text-[10px] font-bold text-white leading-none">T</span>
+                          </div>
+                          
+                          {/* Row 3 */}
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
+                        </div>
                       </div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
-                        <span className="text-[10px] font-bold text-white leading-none">P</span>
+
+                      {/* Addressee */}
+                      <div className="mb-8 font-bold text-[14px] space-y-1">
+                        <p>{loja.nomFantasia || '«NOME_LOJA»'}</p>
+                        <p>{loja.logradouro || '«ENDERECO»'}</p>
                       </div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-red-600 to-red-800 shadow-sm border border-red-900 flex items-center justify-center">
-                        {/* Red circle */}
+
+                      {/* Body Text */}
+                      <p className="text-[14px] leading-[1.6] text-justify mb-5">
+                        Apresentamos <strong>{selectedColab?.nome || '«PROMOTOR»'}</strong>, portador do <strong>RG: {selectedColab?.rg || '«RG»'}</strong> e do <strong>CPF: {selectedColab?.cpf || '«CPF»'}</strong> irá realizar atividades ligadas à de produtos da empresa <strong>EPSON DO BRASIL IND E COM LTDA</strong> no setor de informática de sua loja, no período indeterminado em dias alternados entre 09:00 as 18:00 hs. Informamos que ele não possui vínculo empregatício com vosso estabelecimento, cabendo a nós a responsabilidade por qualquer custo empregatício ou securitário. Abaixo para o seu conhecimento, a sua atividade:
+                      </p>
+
+                      <div className="pl-8 mb-5 text-[14px]">
+                        <p>1. Atendimento ao cliente</p>
                       </div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
-                        <span className="text-[10px] font-bold text-white leading-none">T</span>
-                      </div>
+
+                      <p className="text-[14px] leading-[1.6] text-justify mb-10">
+                        Serão de nossa inteira responsabilidade todos os atos praticados por ele em seu estabelecimento bem como ressarcimento de eventuais prejuízos por ele ocasionados. Esclarecendo que o promotor já foi orientado no sentido de observar e cumprir todas as normas internas da loja. Solicitamos que qualquer problema com o funcionário, seja comunicado a Sra. MARIA CINELANDIA NEVES, pelo telefone 11 99153-7144 RAMAL 3174, para sejam tomadas as devidas providências. Outro assim cumpre-nos estabelecer que toda a responsabilidade civil e código do consumidor ficarão o nosso encargo.
+                      </p>
                       
-                      {/* Row 3 */}
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                      <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                    </div>
-                  </div>
+                      <p className="text-[14px] mb-8">Atenciosamente,</p>
 
-                  {/* Addressee */}
-                  <div className="mb-8 font-bold text-[14px] space-y-1">
-                    <p>{selectedLoja?.nomFantasia || '«NOME_LOJA»'}</p>
-                    <p>{selectedLoja?.logradouro || '«ENDERECO»'}</p>
-                  </div>
-
-                  {/* Body Text */}
-                  <p className="text-[14px] leading-[1.6] text-justify mb-5">
-                    Apresentamos <strong>{selectedColab?.nome || '«PROMOTOR»'}</strong>, portador do <strong>RG: {selectedColab?.rg || '«RG»'}</strong> e do <strong>CPF: {selectedColab?.cpf || '«CPF»'}</strong> irá realizar atividades ligadas à de produtos da empresa <strong>EPSON DO BRASIL IND E COM LTDA</strong> no setor de informática de sua loja, no período indeterminado em dias alternados entre 09:00 as 18:00 hs. Informamos que ele não possui vínculo empregatício com vosso estabelecimento, cabendo a nós a responsabilidade por qualquer custo empregatício ou securitário. Abaixo para o seu conhecimento, a sua atividade:
-                  </p>
-
-                  <div className="pl-8 mb-5 text-[14px]">
-                    <p>1. Atendimento ao cliente</p>
-                  </div>
-
-                  <p className="text-[14px] leading-[1.6] text-justify mb-10">
-                    Serão de nossa inteira responsabilidade todos os atos praticados por ele em seu estabelecimento bem como ressarcimento de eventuais prejuízos por ele ocasionados. Esclarecendo que o promotor já foi orientado no sentido de observar e cumprir todas as normas internas da loja. Solicitamos que qualquer problema com o funcionário, seja comunicado a Sra. MARIA CINELANDIA NEVES, pelo telefone 11 99153-7144 RAMAL 3174, para sejam tomadas as devidas providências. Outro assim cumpre-nos estabelecer que toda a responsabilidade civil e código do consumidor ficarão o nosso encargo.
-                  </p>
-                  
-                  <p className="text-[14px] mb-8">Atenciosamente,</p>
-
-                  {/* Signatures and Stamp */}
-                  <div className="flex justify-between mt-32 relative">
-                    
-                    {/* Left block (Stamp + Signature) */}
-                    <div className="w-[300px] relative">
-                       {/* Fake Signature inside the stamp area */}
-                       <div className="absolute bottom-[30px] left-10 opacity-40 w-32 h-20 text-[#606fa6] pointer-events-none z-0">
-                         <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                           <path d="M 20,80 Q 40,0 60,60 T 90,20 M 35,50 L 50,50 M 45,90 C 20,40 80,10 90,80" />
-                         </svg>
-                      </div>
-
-                      {/* Outlined Stamp Box */}
-                      <div className="absolute bottom-[30px] border border-zinc-400 p-2 text-center transform -rotate-2 w-[240px] z-10 bg-white/50 opacity-70 flex flex-col justify-center items-center h-[100px] left-1/2 -translate-x-1/2">
-                        {/* Stamp Corners manually drawn */}
-                        <div className="absolute -top-[1px] -left-[1px] w-4 h-4 border-t border-l border-zinc-600 bg-transparent"></div>
-                        <div className="absolute -top-[1px] -right-[1px] w-4 h-4 border-t border-r border-zinc-600 bg-transparent"></div>
-                        <div className="absolute -bottom-[1px] -left-[1px] w-4 h-4 border-b border-l border-zinc-600 bg-transparent"></div>
-                        <div className="absolute -bottom-[1px] -right-[1px] w-4 h-4 border-b border-r border-zinc-600 bg-transparent"></div>
+                      {/* Signatures and Stamp */}
+                      <div className="flex justify-between mt-32 relative">
                         
-                        <p className="text-[13px] font-black tracking-tighter text-zinc-600 m-0 leading-none">01.402.786/0001-08</p>
-                        <p className="text-[9px] font-bold text-zinc-500 mt-1 uppercase leading-tight tracking-tight">SPOT PROMOÇÕES EVENTOS E</p>
-                        <p className="text-[8px] font-bold text-zinc-500 uppercase leading-tight tracking-tight mb-1">MERCHANDISING LTDA.</p>
-                        
-                        <p className="text-[7.5px] font-medium text-zinc-500 leading-tight">R. Joaquim Floriano, 100 - 6º Andar</p>
-                        <p className="text-[7.5px] font-medium text-zinc-500 leading-tight mb-2">Itaim Bibi - CEP 04534-000</p>
-                        
-                        <div className="border-t border-zinc-400 w-16 pt-0.5 mt-0.5"></div>
-                        <p className="text-[8px] font-bold text-zinc-500">SÃO PAULO - SP</p>
+                        {/* Left block (Stamp + Signature) */}
+                        <div className="w-[300px] relative">
+                           {/* Fake Signature inside the stamp area */}
+                           <div className="absolute bottom-[30px] left-10 opacity-40 w-32 h-20 text-[#606fa6] pointer-events-none z-0">
+                             <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                               <path d="M 20,80 Q 40,0 60,60 T 90,20 M 35,50 L 50,50 M 45,90 C 20,40 80,10 90,80" />
+                             </svg>
+                          </div>
+
+                          {/* Outlined Stamp Box */}
+                          <div className="absolute bottom-[30px] border border-zinc-400 p-2 text-center transform -rotate-2 w-[240px] z-10 bg-white/50 opacity-70 flex flex-col justify-center items-center h-[100px] left-1/2 -translate-x-1/2">
+                            {/* Stamp Corners manually drawn */}
+                            <div className="absolute -top-[1px] -left-[1px] w-4 h-4 border-t border-l border-zinc-600 bg-transparent"></div>
+                            <div className="absolute -top-[1px] -right-[1px] w-4 h-4 border-t border-r border-zinc-600 bg-transparent"></div>
+                            <div className="absolute -bottom-[1px] -left-[1px] w-4 h-4 border-b border-l border-zinc-600 bg-transparent"></div>
+                            <div className="absolute -bottom-[1px] -right-[1px] w-4 h-4 border-b border-r border-zinc-600 bg-transparent"></div>
+                            
+                            <p className="text-[13px] font-black tracking-tighter text-zinc-600 m-0 leading-none">01.402.786/0001-08</p>
+                            <p className="text-[9px] font-bold text-zinc-500 mt-1 uppercase leading-tight tracking-tight">SPOT PROMOÇÕES EVENTOS E</p>
+                            <p className="text-[8px] font-bold text-zinc-500 uppercase leading-tight tracking-tight mb-1">MERCHANDISING LTDA.</p>
+                            
+                            <p className="text-[7.5px] font-medium text-zinc-500 leading-tight">R. Joaquim Floriano, 100 - 6º Andar</p>
+                            <p className="text-[7.5px] font-medium text-zinc-500 leading-tight mb-2">Itaim Bibi - CEP 04534-000</p>
+                            
+                            <div className="border-t border-zinc-400 w-16 pt-0.5 mt-0.5"></div>
+                            <p className="text-[8px] font-bold text-zinc-500">SÃO PAULO - SP</p>
+                          </div>
+
+                          <div className="w-full border-t border-black pt-2 text-center relative z-10 flex flex-col h-[50px]">
+                            <p className="text-[10px] font-bold text-black uppercase mt-1">SPOT PROMOÇÕES EVENTOS E MERCHANDISING</p>
+                          </div>
+                        </div>
+
+                        {/* Right block (Ciente Promotor) */}
+                        <div className="w-[250px] relative">
+                          <div className="w-full border-t border-black pt-2 text-center flex flex-col h-[50px] justify-between">
+                            <p className="text-[12px] text-center">CIENTE</p>
+                            <p className="text-[12px] font-bold text-center uppercase">{selectedColab?.nome || 'PROMOTOR'}</p>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="w-full border-t border-black pt-2 text-center relative z-10 flex flex-col h-[50px]">
-                        <p className="text-[10px] font-bold text-black uppercase mt-1">SPOT PROMOÇÕES EVENTOS E MERCHANDISING</p>
-                      </div>
-                    </div>
-
-                    {/* Right block (Ciente Promotor) */}
-                    <div className="w-[250px] relative">
-                      <div className="w-full border-t border-black pt-2 text-center flex flex-col h-[50px] justify-between">
-                        <p className="text-[12px] text-center">CIENTE</p>
-                        <p className="text-[12px] font-bold text-center uppercase">{selectedColab?.nome || 'PROMOTOR'}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                </motion.div>
+                    </motion.div>
+                  ))}
+                </div>
               )}
             </div>
 
@@ -462,11 +497,17 @@ export default function CartasPage() {
 
       <style dangerouslySetInnerHTML={{__html: `
         @media print {
-          @page { size: portrait; margin: 15mm; }
+          @page { size: portrait; margin: 0; }
           html, body {
             background-color: white !important;
             height: auto !important;
             overflow: visible !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .page-break {
+            break-before: page;
+            page-break-before: always;
           }
         }
       `}} />

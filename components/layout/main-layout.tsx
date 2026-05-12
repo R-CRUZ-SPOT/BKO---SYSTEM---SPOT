@@ -116,7 +116,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
         const count = data.filter(c => {
           if (!c.data_nascimento) return false;
           // data_nascimento is YYYY-MM-DD
-          return c.data_nascimento.includes(todayMD);
+          return c.data_nascimento.endsWith(todayMD);
         }).length;
 
         setBirthdayCount(count);

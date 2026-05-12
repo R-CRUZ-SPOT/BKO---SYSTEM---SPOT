@@ -202,10 +202,15 @@ export default function AniversariantesPage() {
   };
 
   const aniversariantesDoMes = useMemo(() => {
+    const targetMonth = currentMonth; // 0-indexed
+    
     let filtered = colaboradores.filter(c => {
       if (!c.data_nascimento) return false;
-      const birthDate = parseISO(c.data_nascimento);
-      return birthDate.getMonth() === currentMonth;
+      // data_nascimento is YYYY-MM-DD
+      const parts = c.data_nascimento.split('-');
+      if (parts.length < 2) return false;
+      const bMonth = parseInt(parts[1], 10) - 1;
+      return bMonth === targetMonth;
     });
 
     if (search) {
@@ -214,17 +219,22 @@ export default function AniversariantesPage() {
     }
 
     return filtered.sort((a, b) => {
-      const dayA = parseISO(a.data_nascimento).getDate();
-      const dayB = parseISO(b.data_nascimento).getDate();
+      const dayA = parseInt(a.data_nascimento.split('-')[2], 10);
+      const dayB = parseInt(b.data_nascimento.split('-')[2], 10);
       return dayA - dayB;
     });
   }, [colaboradores, currentMonth, search]);
 
   const aniversariantesHoje = useMemo(() => {
     const today = new Date();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayMD = `${month}-${day}`;
+
     return colaboradores.filter(c => {
-      const birthDate = parseISO(c.data_nascimento);
-      return birthDate.getDate() === today.getDate() && birthDate.getMonth() === today.getMonth();
+      if (!c.data_nascimento) return false;
+      // Precisely match MM-DD at the end of the string
+      return c.data_nascimento.endsWith(todayMD);
     });
   }, [colaboradores]);
 
@@ -375,11 +385,11 @@ export default function AniversariantesPage() {
                           })()}
 
                       <div className="relative flex justify-between items-start mt-4">
-                        <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-4 sm:gap-6 flex-1 min-w-0 pr-2">
                           <motion.div 
                             initial={{ scale: 0.8, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
-                            className="w-16 h-16 rounded-[1.5rem] bg-zinc-900 border-2 border-emerald-400 shadow-lg relative overflow-hidden"
+                            className="w-16 h-16 rounded-[1.5rem] bg-zinc-900 border-2 border-emerald-400 shadow-lg relative overflow-hidden flex-shrink-0"
                           >
                             <Image
                                src={colab.foto_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(colab.nome || 'X')}&background=18181b&color=34d399&size=128&bold=true&rounded=false`}
@@ -395,16 +405,16 @@ export default function AniversariantesPage() {
                               className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-amber-400 rounded-full border-4 border-white z-10"
                             />
                           </motion.div>
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">Destaque do Dia</span>
-                            <h3 className="text-2xl font-black text-zinc-900 italic tracking-tighter uppercase leading-none group-hover:text-emerald-600 transition-colors truncate max-w-[200px] sm:max-w-none">
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <span className="inline-block text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 mb-1">Destaque do Dia</span>
+                            <h3 className="text-xl sm:text-2xl font-black text-zinc-900 italic tracking-tighter uppercase leading-none group-hover:text-emerald-600 transition-colors truncate w-full">
                               {colab.nome}
                             </h3>
-                            <p className="text-zinc-500 font-bold uppercase tracking-[0.1em] text-[10px]">{colab.cargo || 'Membro do Time'}</p>
+                            <p className="text-zinc-500 font-bold uppercase tracking-[0.1em] text-[10px] truncate w-full">{colab.cargo || 'Membro do Time'}</p>
                           </div>
                         </div>
 
-                        <div className="text-right z-10">
+                        <div className="text-right z-10 flex-shrink-0 ml-2">
                           <span className="block text-5xl font-black text-zinc-300 italic group-hover:text-emerald-200 transition-colors leading-none tracking-tighter">
                             {format(new Date(), 'dd')}
                           </span>
@@ -533,8 +543,15 @@ export default function AniversariantesPage() {
               </div>
             ) : (
               aniversariantesDoMes.map((colab, idx) => {
-                const bDay = parseISO(colab.data_nascimento);
-                const isToday = isSameDay(bDay, new Date());
+                const parts = colab.data_nascimento.split('-');
+                const bDayNum = parseInt(parts[2], 10);
+                const bMonthNum = parseInt(parts[1], 10) - 1;
+                
+                const today = new Date();
+                const isToday = bDayNum === today.getDate() && bMonthNum === today.getMonth();
+                
+                // Get the day of the week for this year's birthday
+                const bDayDate = setYear(parseISO(colab.data_nascimento), today.getFullYear());
                 
                 return (
                   <motion.div
@@ -568,10 +585,10 @@ export default function AniversariantesPage() {
                               </div>
                               <div className="flex flex-col items-end">
                                 <span className={`text-3xl font-black italic transition-colors leading-none tracking-tighter ${isToday ? 'text-zinc-800' : 'text-zinc-300 group-hover:text-emerald-200'}`}>
-                                  {bDay.getDate()}
+                                  {bDayNum}
                                 </span>
                                 <span className={`text-[8px] font-black uppercase tracking-widest ${isToday ? 'text-zinc-600' : 'text-zinc-400'}`}>
-                                  {format(bDay, 'EEE', { locale: ptBR })}
+                                  {format(bDayDate, 'EEE', { locale: ptBR })}
                                 </span>
                               </div>
                             </div>
