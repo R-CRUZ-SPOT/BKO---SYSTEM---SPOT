@@ -153,6 +153,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     { name: 'Controle de Linhas', href: '/linhas', icon: Phone },
     { name: 'Gestão de Vouchers', href: '/vouchers', icon: Ticket },
     { name: 'Cartas de Apresentação', href: '/cartas', icon: FileText },
+    { name: 'Termos', href: '/termos', icon: FileText },
   ];
 
   if (profile?.role === 'ADMIN') {
