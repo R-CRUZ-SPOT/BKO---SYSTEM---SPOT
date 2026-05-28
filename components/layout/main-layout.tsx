@@ -96,6 +96,11 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     if (user) {
       loadBirthdayCount();
     }
+    
+    // Failsafe: Radix UI / radix-ui dialogs can sometimes leave the body locked
+    // when unmounting abruptly (e.g. via Next.js router.push).
+    document.body.style.pointerEvents = 'auto';
+    document.body.removeAttribute('data-scroll-locked');
   }, [user, loading, router]);
 
   const loadBirthdayCount = async () => {
@@ -176,7 +181,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm z-40 lg:hidden"
+              className="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm z-40 lg:pointer-events-none lg:opacity-0 lg:hidden"
             />
             <motion.aside
               initial={{ x: '-100%' }}

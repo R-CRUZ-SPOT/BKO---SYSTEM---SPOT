@@ -38,7 +38,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const checkInactivity = async () => {
       const lastActivity = sessionStorage.getItem('ais_last_activity');
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      let currentSession = null;
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error("Session error:", error.message);
+          await supabase.auth.signOut();
+          if (mounted) {
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            setLoading(false);
+          }
+          return true; // Consider expired if error
+        }
+        currentSession = data.session;
+      } catch (e) {
+        console.error("Session catch error:", e);
+        await supabase.auth.signOut();
+        if (mounted) {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+        }
+        return true;
+      }
       
       if (currentSession && lastActivity) {
         const inactiveTime = Date.now() - parseInt(lastActivity, 10);
@@ -62,17 +87,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const isExpired = await checkInactivity();
       if (isExpired) return;
 
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (mounted) {
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          updateActivity();
-          fetchProfile(session.user.id);
-        } else {
-          setLoading(false);
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        
+        if (mounted) {
+          setSession(data.session);
+          setUser(data.session?.user ?? null);
+          if (data.session?.user) {
+            updateActivity();
+            fetchProfile(data.session.user.id);
+          } else {
+            setLoading(false);
+          }
         }
+      } catch (error) {
+         console.error("Failed to get initial session:", error);
+         await supabase.auth.signOut();
+         if (mounted) {
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            setLoading(false);
+         }
       }
     }
 
@@ -85,16 +122,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
+        console.log("Auth event:", event);
+        if (event === 'SIGNED_OUT') {
+           sessionStorage.removeItem('ais_last_activity');
+        }
+        
         if (mounted) {
-          setSession(session);
-          setUser(session?.user ?? null);
-          if (session?.user) {
-            updateActivity();
-            fetchProfile(session.user.id);
-          } else {
+          if (event === 'SIGNED_OUT') {
+            setSession(null);
+            setUser(null);
             setProfile(null);
             setLoading(false);
+          } else {
+            setSession(session);
+            setUser(session?.user ?? null);
+            if (session?.user) {
+              updateActivity();
+              fetchProfile(session.user.id);
+            } else {
+              setProfile(null);
+              setLoading(false);
+            }
           }
         }
       }

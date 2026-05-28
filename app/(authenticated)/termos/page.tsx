@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Printer, Plus, Trash2, FileText, Search } from 'lucide-react';
+import { Printer, Plus, Trash2, FileText, Search, Smartphone } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
@@ -63,6 +63,36 @@ export default function TermosPage() {
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+  };
+
+  const [isLoadingIMEI, setIsLoadingIMEI] = useState(false);
+
+  const handleCarregarIMEI = async () => {
+    if (!selectedColaboradorId) {
+      alert("Por favor, selecione um colaborador primeiro.");
+      return;
+    }
+    setIsLoadingIMEI(true);
+    try {
+      const { data, error } = await supabase
+        .from('aparelhos')
+        .select('modelo, imei')
+        .eq('colaborador_id', selectedColaboradorId)
+        .limit(1)
+        .single();
+      
+      if (error || !data) {
+        alert("Nenhum aparelho celular vinculado encontrado para este colaborador.");
+      } else {
+        setNewProduto(data.modelo || '');
+        setNewIdItem(data.imei || '');
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao buscar aparelho.");
+    } finally {
+      setIsLoadingIMEI(false);
+    }
   };
 
   const handleAddProduto = () => {
@@ -423,6 +453,22 @@ export default function TermosPage() {
             <DialogTitle>Adicionar Item</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            {selectedColaboradorId ? (
+              <Button 
+                type="button"
+                variant="outline" 
+                className="w-full gap-2 border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-800 transition-colors" 
+                onClick={handleCarregarIMEI}
+                disabled={isLoadingIMEI}
+              >
+                <Smartphone className="w-4 h-4" />
+                {isLoadingIMEI ? "Carregando..." : "Carregar Aparelho Vinculado"}
+              </Button>
+            ) : (
+               <div className="text-xs text-amber-600 bg-amber-50 p-2 text-center rounded border border-amber-200">
+                 Selecione um colaborador primeiro para carregar o IMEI automaticamente.
+               </div>
+            )}
             <div className="space-y-2">
               <Label>Produto</Label>
               <Input 
