@@ -92,11 +92,19 @@ export default function AniversariantesPage() {
     try {
       const { data, error } = await supabase
         .from('vouchers')
-        .select('*')
-        .eq('status', 'disponível');
+        .select('*');
       
       if (error) throw error;
-      setAvailableVouchers(data || []);
+      
+      // Filtra localmente de forma extremamente robusta contra acentos, diferenciação de maiúsculas/minúsculas e vínculos antigos
+      const filtered = (data || []).filter((v: any) => {
+        const statusClean = (v.status || '').toLowerCase().trim();
+        const isDisp = statusClean === 'disponível' || statusClean === 'disponivel';
+        const isUnassigned = !v.colaborador_id && !v.matricula;
+        return isDisp && isUnassigned;
+      });
+      
+      setAvailableVouchers(filtered);
     } catch (error: any) {
       toast.error('Erro ao carregar vouchers disponíveis');
     } finally {
@@ -807,9 +815,17 @@ export default function AniversariantesPage() {
                         <div className="space-y-1">
                           <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">{voucher.produto}</span>
                           <p className="text-lg font-black text-zinc-900 tracking-tight leading-none italic">{voucher.valor}</p>
-                          {voucher.validade && (
-                            <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-[0.1em]">Expira em: {format(parseISO(voucher.validade), 'dd/MM/yyyy')}</p>
-                          )}
+                          <div className="flex flex-col gap-1 mt-1">
+                            {voucher.codigo && (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-700 font-mono text-[10px] font-bold uppercase tracking-wider w-fit border border-zinc-200 group-hover:bg-emerald-100 group-hover:text-emerald-800 group-hover:border-emerald-200 transition-colors">
+                                <Ticket className="w-3 h-3 text-zinc-400 group-hover:text-emerald-600" />
+                                {voucher.codigo}
+                              </span>
+                            )}
+                            {voucher.validade && (
+                              <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-[0.1em]">Expira em: {format(parseISO(voucher.validade), 'dd/MM/yyyy')}</p>
+                            )}
+                          </div>
                         </div>
                         <div className="w-10 h-10 rounded-full bg-white border border-zinc-200 flex items-center justify-center group-hover:bg-emerald-500 group-hover:border-emerald-500 transition-all">
                           <Ticket className="w-5 h-5 text-zinc-300 group-hover:text-white" />

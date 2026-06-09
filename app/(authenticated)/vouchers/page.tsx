@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Upload, Plus, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, MoreVertical, Ticket, Filter, CheckCircle2, Clock } from 'lucide-react';
+import { Upload, Download, Plus, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, MoreVertical, Ticket, Filter, CheckCircle2, Clock } from 'lucide-react';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '@/lib/supabase';
@@ -202,6 +202,32 @@ export default function VouchersPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handleExport = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      
+      const exportData = processedData.map(v => ({
+        'Produto': v.produto || '',
+        'Valor': v.valor || '',
+        'Validade': v.validade ? format(parseISO(v.validade), 'dd/MM/yyyy') : '',
+        'Código': v.codigo || '',
+        'Dono': v.colaboradores?.nome || '',
+        'Matrícula': v.colaboradores?.matricula || v.matricula || '',
+        'Status': v.status || ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Vouchers");
+      
+      XLSX.writeFile(wb, `vouchers_export_${format(new Date(), 'dd-MM-yyyy')}.xlsx`);
+      toast.success('Exportação concluída com sucesso!');
+    } catch (error) {
+      console.error(error);
+      toast.error('Erro ao exportar dados.');
+    }
+  };
+
   const openForm = (voucher: any = null) => {
     if (voucher) {
       setEditingVoucher(voucher);
@@ -315,6 +341,14 @@ export default function VouchersPage() {
           >
             <Upload className="w-4 h-4 mr-2 text-zinc-500" />
             Importar CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            className="rounded-xl border-zinc-200 hover:bg-zinc-50"
+            onClick={handleExport}
+          >
+            <Download className="w-4 h-4 mr-2 text-zinc-500" />
+            Exportar
           </Button>
           <Button 
             variant="default" 
