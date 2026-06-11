@@ -38,6 +38,7 @@ export default function VouchersPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [voucherToDelete, setVoucherToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
 
   // Pagination & Sorting
   const [currentPage, setCurrentPage] = useState(1);
@@ -71,12 +72,65 @@ export default function VouchersPage() {
             .order(sortColumn, { ascending: sortDirection === 'asc' });
           
           if (simpleError) throw simpleError;
-          setAllData(simpleData || []);
+          const loadedSimple = simpleData || [];
+          setAllData(loadedSimple);
+
+          // Correção preguiçosa para valores antigos inconsistentes
+          const inconsistent = loadedSimple.filter((v: any) => {
+            const isDisp = v.status === 'disponível' || v.status === 'disponivel';
+            const hasOwner = !!v.matricula || !!v.colaborador_id;
+            return isDisp && hasOwner;
+          });
+
+          if (inconsistent.length > 0) {
+            supabase
+              .from('vouchers')
+              .update({ status: 'utilizado' })
+              .in('id', inconsistent.map((v: any) => v.id))
+              .then(({ error: updateErr }) => {
+                if (!updateErr) {
+                  setAllData(prev =>
+                    prev.map(v =>
+                      inconsistent.some(inc => inc.id === v.id)
+                        ? { ...v, status: 'utilizado' }
+                        : v
+                    )
+                  );
+                }
+              });
+          }
           return;
         }
         throw error;
       }
-      setAllData(data || []);
+      
+      const loadedData = data || [];
+      setAllData(loadedData);
+
+      // Correção preguiçosa para valores antigos inconsistentes
+      const inconsistent = loadedData.filter((v: any) => {
+        const isDisp = v.status === 'disponível' || v.status === 'disponivel';
+        const hasOwner = !!v.matricula || !!v.colaborador_id;
+        return isDisp && hasOwner;
+      });
+
+      if (inconsistent.length > 0) {
+        supabase
+          .from('vouchers')
+          .update({ status: 'utilizado' })
+          .in('id', inconsistent.map((v: any) => v.id))
+          .then(({ error: updateErr }) => {
+            if (!updateErr) {
+              setAllData(prev =>
+                prev.map(v =>
+                  inconsistent.some(inc => inc.id === v.id)
+                    ? { ...v, status: 'utilizado' }
+                    : v
+                )
+              );
+            }
+          });
+      }
     } catch (error: any) {
       console.error('Erro ao carregar vouchers:', error);
       toast.error('Erro ao carregar vouchers: ' + (error.message || 'Verifique se a tabela foi criada no Supabase.'));
@@ -145,6 +199,15 @@ export default function VouchersPage() {
         const { data: colabs } = await supabase.from('colaboradores').select('id, matricula');
         const colabMap = new Map(colabs?.map(c => [c.matricula, c.id]));
 
+        // Get existing vouchers to prevent duplicates
+        const { data: existingVouchers } = await supabase.from('vouchers').select('codigo');
+        const existingCodes = new Set(
+          (existingVouchers || []).map((v: any) => (v.codigo || '').toString().trim().toLowerCase())
+        );
+
+        const seenInBatch = new Set<string>();
+        let duplicatesCount = 0;
+
         const formattedVouchers = data.map((row: any) => {
           const produto = findKey(row, 'Produto', 'Product') || '';
           const valor = findKey(row, 'Valor', 'Value') || '';
@@ -170,7 +233,7 @@ export default function VouchersPage() {
           }
 
           const colaborador_id = matricula ? colabMap.get(matricula) : null;
-          const status = colaborador_id ? 'utilizado' : 'disponível';
+          const status = matricula || colaborador_id ? 'utilizado' : 'disponível';
 
           return {
             produto,
@@ -181,17 +244,37 @@ export default function VouchersPage() {
             colaborador_id: colaborador_id || null,
             status
           };
-        }).filter(v => v.produto && v.codigo);
+        }).filter(v => {
+          if (!v.produto || !v.codigo) return false;
+          
+          const cleanCode = (v.codigo || '').toString().trim().toLowerCase();
+          
+          if (existingCodes.has(cleanCode) || seenInBatch.has(cleanCode)) {
+            duplicatesCount++;
+            return false;
+          }
+          
+          seenInBatch.add(cleanCode);
+          return true;
+        });
 
         if (formattedVouchers.length === 0) {
-          toast.error('Dados inválidos. Verifique as colunas: Produto, Valor, Validade, Código e Matricula.', { id: 'import' });
+          if (duplicatesCount > 0) {
+            toast.info(`Nenhum voucher novo foi importado. Todos os ${duplicatesCount} vouchers da planilha já estavam cadastrados no sistema.`, { id: 'import', duration: 5000 });
+          } else {
+            toast.error('Dados inválidos ou vazios. Verifique as colunas do arquivo.', { id: 'import' });
+          }
           return;
         }
 
         const { error } = await supabase.from('vouchers').insert(formattedVouchers);
         if (error) throw error;
 
-        toast.success(`${formattedVouchers.length} vouchers importados com sucesso!`, { id: 'import' });
+        if (duplicatesCount > 0) {
+          toast.success(`${formattedVouchers.length} novos vouchers importados! (${duplicatesCount} já existentes foram ignorados).`, { id: 'import', duration: 5000 });
+        } else {
+          toast.success(`${formattedVouchers.length} vouchers importados com sucesso!`, { id: 'import' });
+        }
         loadVouchers();
       } catch (error: any) {
         console.error(error);
@@ -206,15 +289,19 @@ export default function VouchersPage() {
     try {
       const XLSX = await import('xlsx');
       
-      const exportData = processedData.map(v => ({
-        'Produto': v.produto || '',
-        'Valor': v.valor || '',
-        'Validade': v.validade ? format(parseISO(v.validade), 'dd/MM/yyyy') : '',
-        'Código': v.codigo || '',
-        'Dono': v.colaboradores?.nome || '',
-        'Matrícula': v.colaboradores?.matricula || v.matricula || '',
-        'Status': v.status || ''
-      }));
+      const exportData = processedData.map(v => {
+        const isDisp = v.status === 'disponível' && !v.matricula && !v.colaborador_id;
+        const displayStatus = isDisp ? 'disponível' : 'utilizado';
+        return {
+          'Produto': v.produto || '',
+          'Valor': v.valor || '',
+          'Validade': v.validade ? format(parseISO(v.validade), 'dd/MM/yyyy') : '',
+          'Código': v.codigo || '',
+          'Dono': v.colaboradores?.nome || '',
+          'Matrícula': v.colaboradores?.matricula || v.matricula || '',
+          'Status': displayStatus
+        };
+      });
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
@@ -267,7 +354,7 @@ export default function VouchersPage() {
       const payload = {
         ...formData,
         colaborador_id,
-        status: colaborador_id ? 'utilizado' : formData.status,
+        status: formData.matricula || colaborador_id ? 'utilizado' : formData.status,
         updated_at: new Date().toISOString()
       };
 
@@ -304,6 +391,73 @@ export default function VouchersPage() {
       toast.error('Erro ao excluir: ' + error.message);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleCleanDuplicates = async () => {
+    if (isCleaningDuplicates) return;
+    setIsCleaningDuplicates(true);
+    toast.loading('Analisando e removendo duplicados...', { id: 'dedup' });
+    try {
+      // 1. Fetch all vouchers to check for duplicates
+      const { data: allVouchers, error } = await supabase
+        .from('vouchers')
+        .select('id, codigo, status, matricula, colaborador_id, created_at')
+        .order('created_at', { ascending: true }); // older first
+
+      if (error) throw error;
+      
+      if (!allVouchers || allVouchers.length === 0) {
+        toast.info('Nenhum voucher cadastrado.', { id: 'dedup' });
+        return;
+      }
+
+      // 2. Classify duplicates
+      const seenCodes = new Map<string, any>();
+      const idsToDelete: string[] = [];
+
+      allVouchers.forEach((v: any) => {
+        const cleanCode = (v.codigo || '').toString().trim().toLowerCase();
+        if (!cleanCode) return; // skip empty
+
+        if (seenCodes.has(cleanCode)) {
+          const existing = seenCodes.get(cleanCode);
+          
+          // Priority logic: If current duplicate has customized assignment / utilised status, Keep it and dump the other.
+          const currentIsUtilized = v.status === 'utilizado' || !!v.colaborador_id || !!v.matricula;
+          const existingIsUtilized = existing.status === 'utilizado' || !!existing.colaborador_id || !!existing.matricula;
+
+          if (currentIsUtilized && !existingIsUtilized) {
+            idsToDelete.push(existing.id);
+            seenCodes.set(cleanCode, v); // update mapping to the utilized one
+          } else {
+            idsToDelete.push(v.id);
+          }
+        } else {
+          seenCodes.set(cleanCode, v);
+        }
+      });
+
+      if (idsToDelete.length === 0) {
+        toast.success('Não há nenhum voucher duplicado no sistema!', { id: 'dedup', duration: 4000 });
+        return;
+      }
+
+      // 3. Delete duplicates in database
+      const { error: deleteError } = await supabase
+        .from('vouchers')
+        .delete()
+        .in('id', idsToDelete);
+
+      if (deleteError) throw deleteError;
+
+      toast.success(`Ação concluída! Foram localizados e removidos ${idsToDelete.length} vouchers duplicados.`, { id: 'dedup', duration: 5000 });
+      loadVouchers();
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Erro ao limpar banco de dados: ' + err.message, { id: 'dedup' });
+    } finally {
+      setIsCleaningDuplicates(false);
     }
   };
 
@@ -351,6 +505,15 @@ export default function VouchersPage() {
             Exportar
           </Button>
           <Button 
+            variant="outline" 
+            className="rounded-xl border-red-200 hover:border-red-300 text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
+            onClick={handleCleanDuplicates}
+            disabled={isCleaningDuplicates}
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Limpar Duplicados
+          </Button>
+          <Button 
             variant="default" 
             className="rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-600/20"
             onClick={() => openForm()}
@@ -384,7 +547,7 @@ export default function VouchersPage() {
               <div>
                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Disponíveis</p>
                 <p className="text-2xl font-black text-zinc-900">
-                  {allData.filter(v => v.status === 'disponível').length}
+                  {allData.filter(v => v.status === 'disponível' && !v.matricula && !v.colaborador_id).length}
                 </p>
               </div>
             </div>
@@ -399,7 +562,7 @@ export default function VouchersPage() {
               <div>
                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Utilizados</p>
                 <p className="text-2xl font-black text-zinc-900">
-                  {allData.filter(v => v.status === 'utilizado').length}
+                  {allData.filter(v => v.status === 'utilizado' || !!v.matricula || !!v.colaborador_id).length}
                 </p>
               </div>
             </div>
@@ -477,13 +640,19 @@ export default function VouchersPage() {
                       )}
                     </TableCell>
                     <TableCell className="px-6 py-4 text-center">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
-                        voucher.status === 'disponível' 
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
-                          : 'bg-zinc-100 text-zinc-500 border-zinc-200'
-                      }`}>
-                        {voucher.status}
-                      </span>
+                      {(() => {
+                        const isDisp = voucher.status === 'disponível' && !voucher.matricula && !voucher.colaborador_id;
+                        const displayStatus = isDisp ? 'disponível' : 'utilizado';
+                        return (
+                          <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                            isDisp 
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                              : 'bg-zinc-100 text-zinc-500 border-zinc-200'
+                          }`}>
+                            {displayStatus}
+                          </span>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="px-6 py-4 text-right">
                       <DropdownMenu>
