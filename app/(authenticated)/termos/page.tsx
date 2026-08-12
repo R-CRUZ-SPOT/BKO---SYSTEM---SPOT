@@ -301,24 +301,16 @@ export default function TermosPage() {
                   <p className="text-sm font-medium text-zinc-400 mt-1">Preencha os dados e clique em &quot;Visualizar Termo&quot; para ver a prévia.</p>
                 </div>
               ) : (
-                <div className="bg-white p-10 max-w-[210mm] w-full shadow-xl print:shadow-none font-sans text-black text-sm relative">
-                  <div className="flex justify-end mb-8">
-                    <div className="text-right">
-                      <h2 className="text-2xl font-bold tracking-widest uppercase">SPOT</h2>
-                      <div className="flex gap-1 justify-end mt-1">
-                        <div className="w-6 h-6 rounded-full bg-zinc-500 font-bold text-white flex items-center justify-center text-xs">S</div>
-                        <div className="w-6 h-6 rounded-full bg-zinc-500 font-bold text-white flex items-center justify-center text-xs">P</div>
-                        <div className="w-6 h-6 rounded-full bg-rose-600 font-bold text-white flex items-center justify-center text-xs">O</div>
-                        <div className="w-6 h-6 rounded-full bg-zinc-500 font-bold text-white flex items-center justify-center text-xs">T</div>
-                      </div>
-                    </div>
+                <div className="bg-white p-10 max-w-[210mm] w-full shadow-xl print:shadow-none print:p-0 print:text-sm font-sans text-black text-sm relative">
+                  <div className="flex justify-end mb-8 print:mb-5">
+                    <img src="/logo-spot.png" alt="SPOT" className="h-16 print:h-12 w-auto" />
                   </div>
 
-                  <div className="text-center font-bold mb-10 text-base uppercase">
+                  <div className="text-center font-bold mb-10 print:mb-5 text-base uppercase">
                     {tipoTermo === 'recebimento' ? 'TERMO DE RECEBIMENTO' : 'TERMO DE DEVOLUÇÃO DE EQUIPAMENTO/MATERIAL'}
                   </div>
 
-                  <div className="text-justify mb-8 leading-relaxed">
+                  <div className="text-justify mb-8 print:mb-4 leading-relaxed print:leading-snug">
                     {tipoTermo === 'recebimento' ? (
                       <p>
                         Pelo presente, eu <strong>{selectedColaborador?.nome || '___________________________'}</strong>, 
@@ -336,7 +328,7 @@ export default function TermosPage() {
                     )}
                   </div>
 
-                  <table className="w-full border-collapse border border-black mb-8 text-center text-sm">
+                  <table className="w-full border-collapse border border-black mb-8 print:mb-4 text-center text-sm">
                     <thead>
                       <tr className="border-[1px] border-black bg-zinc-50 font-bold">
                         <th className="border-[1px] border-black p-2 w-16">QTD</th>
@@ -388,24 +380,24 @@ export default function TermosPage() {
 
                   {tipoTermo === 'recebimento' ? (
                     <>
-                      <p className="text-justify mb-4 leading-relaxed">
+                      <p className="text-justify mb-4 print:mb-3 leading-relaxed print:leading-snug">
                         Declaro estar ciente sobre a necessidade de conservação dele no exercício do trabalho, bem como 
                         comprometo devolvê-lo ao término de meu contrato de trabalho e/ou quando solicitado. Caso aconteça 
                         alguma ocorrência fora do período de trabalho e/ou a devolução do aparelho não ocorra, tenho ciência e 
                         autorizo que a empresa efetue o desconto de <strong>{formatCurrency(totalValue)}</strong> dos meus vencimentos ou relativo às minhas verbas rescisórias.
                       </p>
-                      <p className="text-justify mb-8 leading-relaxed">
+                      <p className="text-justify mb-8 print:mb-4 leading-relaxed print:leading-snug">
                         Declaro estar ciente também de que o equipamento/material NÃO possui nenhum tipo de cobertura 
                         (seguro) bem como nunca deverá ser fornecido ou emprestado para terceiros, ficando ciente que é motivo 
                         para rescisão justificada à entrega para terceiros utilizar.
                       </p>
                       
-                      <div className="border border-black p-4 text-xs mb-8">
-                        <p className="font-bold underline mb-2">AVISO:</p>
-                        <p className="mb-2">
+                      <div className="border border-black p-4 print:p-2 text-xs mb-8 print:mb-5">
+                        <p className="font-bold underline mb-2 print:mb-1">AVISO:</p>
+                        <p className="mb-2 print:mb-1">
                           Em caso de perda, deverá ser feito o Boletim de Ocorrência e será emitido um termo de ciência de desconto em folha de pagamento.
                         </p>
-                        <p className="mb-2">
+                        <p className="mb-2 print:mb-1">
                           Em caso de roubo ou furto, deverá ser feito o Boletim de Ocorrência em delegacia, com a presença do Supervisor ou responsável da 
                           coligada. Caso seja constatado falta de responsabilidade por parte do promotor no ato do roubo ou furto, haverá o desconto em 
                           folha de pagamento.
@@ -417,23 +409,23 @@ export default function TermosPage() {
                       </div>
                     </>
                   ) : (
-                    <p className="text-justify mb-16 leading-relaxed">
+                    <p className="text-justify mb-16 print:mb-8 leading-relaxed print:leading-snug">
                       Declaro está devolvendo os aparelhos acima relacionados em perfeitas condições e com todos os 
                       equipamentos completos, caso não estejam de acordo com a descrição, declaro estar ciente dos descontos 
                       em folha.
                     </p>
                   )}
 
-                  <div className="mt-12 space-y-12">
+                  <div className="mt-12 print:mt-10 space-y-12 print:space-y-8">
                     <p>{today}.</p>
                     
-                    <div className="w-80 space-y-2">
+                    <div className="w-80 space-y-2 print:space-y-1">
                       <div className="border-b border-black"></div>
                       <p className="font-bold">{selectedColaborador?.nome || '______________________________________'}</p>
                     </div>
                   </div>
 
-                  <div className="text-center text-xs mt-24">
+                  <div className="text-center text-xs mt-24 print:mt-10">
                     <p>SPOTPROMO - Rua Joaquim Floriano, 100 6o. Andar - Itaim Bibi - São Paulo – SP</p>
                     <p>www.spotpromo.com.br</p>
                   </div>

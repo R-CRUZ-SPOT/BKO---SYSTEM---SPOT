@@ -388,34 +388,8 @@ export default function CartasPage() {
                           <p className="text-[14px]">São Paulo, {getFormatDate()}</p>
                         </div>
                         
-                        {/* SPOT Logo Simulator */}
-                        <div className="grid grid-cols-4 gap-[6px]">
-                          {/* Row 1 */}
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                          
-                          {/* Row 2 */}
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
-                            <span className="text-[10px] font-bold text-white leading-none">S</span>
-                          </div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
-                            <span className="text-[10px] font-bold text-white leading-none">P</span>
-                          </div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-red-600 to-red-800 shadow-sm border border-red-900 flex items-center justify-center">
-                            {/* Red circle */}
-                          </div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700 flex items-center justify-center">
-                            <span className="text-[10px] font-bold text-white leading-none">T</span>
-                          </div>
-                          
-                          {/* Row 3 */}
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                          <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-b from-zinc-400 to-zinc-600 shadow-sm border border-zinc-700"></div>
-                        </div>
+                        {/* SPOT Logo */}
+                        <img src="/logo-spot.png" alt="SPOT" className="h-16 w-auto" />
                       </div>
 
                       {/* Addressee */}

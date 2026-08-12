@@ -141,3 +141,14 @@
     @apply bg-zinc-200 rounded-full hover:bg-zinc-300 transition-colors;
   }
 }
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html, body {
+    height: auto !important;
+  }
+}
