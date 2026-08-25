@@ -63,6 +63,12 @@ export default function ColaboradoresPage() {
   const [colaboradorToDelete, setColaboradorToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Seleção em massa
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkTogglingStatus, setIsBulkTogglingStatus] = useState(false);
+
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 15;
@@ -175,6 +181,89 @@ export default function ColaboradoresPage() {
   const SortIcon = ({ column }: { column: string }) => {
     if (sortColumn !== column) return <ArrowUpDown className="ml-2 w-4 h-4 inline-block text-gray-400" />;
     return sortDirection === 'asc' ? <ArrowUp className="ml-2 w-4 h-4 inline-block" /> : <ArrowDown className="ml-2 w-4 h-4 inline-block" />;
+  };
+
+  // Seleção em massa: helpers baseados na página atual (colaboradores) e no total filtrado (processedData)
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allOnPageSelected = colaboradores.length > 0 && colaboradores.every(c => selectedIds.has(c.id));
+  const someOnPageSelected = !allOnPageSelected && colaboradores.some(c => selectedIds.has(c.id));
+
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        colaboradores.forEach(c => next.delete(c.id));
+      } else {
+        colaboradores.forEach(c => next.add(c.id));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => setSelectedIds(new Set(processedData.map(c => c.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkToggleStatus = async (newStatus: 'ativo' | 'inativo') => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsBulkTogglingStatus(true);
+    try {
+      const inativacaoData = newStatus === 'inativo' ? new Date().toISOString() : null;
+
+      const { error } = await supabase
+        .from('colaboradores')
+        .update({ status: newStatus, data_inativacao: inativacaoData })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      if (newStatus === 'inativo') {
+        await supabase.from('aparelhos').update({ colaborador_id: null }).in('colaborador_id', ids);
+        await supabase.from('linhas').update({ colaborador_id: null }).in('colaborador_id', ids);
+        await supabase.from('vinculos')
+          .update({ data_fim: new Date().toISOString() })
+          .in('colaborador_id', ids)
+          .is('data_fim', null);
+      }
+
+      toast.success(`${ids.length} colaborador(es) ${newStatus === 'ativo' ? 'ativado(s)' : 'inativado(s)'} com sucesso!`);
+      setSelectedIds(new Set());
+      dataCache.invalidate('colaboradores');
+      dataCache.invalidate('dashboard_stats');
+      loadColaboradores();
+    } catch (error: any) {
+      toast.error('Erro ao atualizar status em massa: ' + error.message);
+    } finally {
+      setIsBulkTogglingStatus(false);
+    }
+  };
+
+  const confirmBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const { error } = await supabase.from('colaboradores').delete().in('id', ids);
+      if (error) throw error;
+
+      toast.success(`${ids.length} colaborador(es) excluído(s) com sucesso!`);
+      setIsBulkDeleteDialogOpen(false);
+      setSelectedIds(new Set());
+      dataCache.invalidate('colaboradores');
+      dataCache.invalidate('dashboard_stats');
+      loadColaboradores();
+    } catch (error: any) {
+      toast.error('Erro ao excluir em massa: ' + error.message);
+    } finally {
+      setIsBulkDeleting(false);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -529,6 +618,38 @@ export default function ColaboradoresPage() {
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const templateData = [
+        {
+          MATRICULA: '00123',
+          NOME: 'Maria Silva',
+          EMAIL: 'maria.silva@spotsul.com',
+          CARGO: 'Analista',
+          JOB: 'Comercial',
+          'DATA DE ADMISSAO': '01/03/2024',
+          'DATA DE NASCIMENTO': '15/07/1990',
+          CPF: '',
+          RG: '',
+          CTPS: '',
+          'SERIE CTPS': ''
+        }
+      ];
+
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      ws['!cols'] = templateData[0] ? Object.keys(templateData[0]).map(() => ({ wch: 18 })) : [];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+
+      XLSX.writeFile(wb, 'Modelo_Importacao_Colaboradores.xlsx');
+      toast.success('Modelo baixado com sucesso!');
+    } catch (error) {
+      console.error(error);
+      toast.error('Erro ao gerar modelo.');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -547,6 +668,10 @@ export default function ColaboradoresPage() {
           <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={() => fileInputRef.current?.click()}>
             <Upload className="w-4 h-4 mr-2 text-zinc-500" />
             Importar
+          </Button>
+          <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={handleDownloadTemplate}>
+            <Download className="w-4 h-4 mr-2 text-zinc-500" />
+            Modelo
           </Button>
           <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={handleExportExcel}>
             <Download className="w-4 h-4 mr-2 text-zinc-500" />
@@ -867,6 +992,30 @@ export default function ColaboradoresPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar Exclusão em Massa</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-500">
+              Deseja realmente excluir <strong>{selectedIds.size}</strong> colaborador(es) selecionado(s)?
+            </p>
+            <p className="text-xs text-red-500 mt-2 italic">
+              Esta ação removerá permanentemente os colaboradores selecionados e encerrará todos os vínculos ativos de aparelhos e linhas. Considere usar &quot;Inativar selecionados&quot; para preservar o histórico.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsBulkDeleteDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={confirmBulkDelete} disabled={isBulkDeleting}>
+              {isBulkDeleting ? 'Excluindo...' : `Sim, Excluir ${selectedIds.size}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Card className="border-none shadow-sm overflow-hidden bg-white/50 backdrop-blur-sm">
         <CardHeader className="py-4 px-6 border-b border-zinc-100 bg-white/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="relative max-w-sm flex-1">
@@ -892,6 +1041,33 @@ export default function ColaboradoresPage() {
             </Select>
           </div>
         </CardHeader>
+        {selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-emerald-50 border-b border-emerald-100">
+            <span className="text-xs font-bold text-emerald-800">
+              {selectedIds.size} selecionado(s)
+              {allOnPageSelected && totalCount > colaboradores.length && (
+                <button type="button" onClick={selectAllFiltered} className="ml-2 underline text-emerald-700 hover:text-emerald-900 font-medium">
+                  Selecionar todos os {totalCount} colaboradores filtrados
+                </button>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="rounded-lg border-zinc-200 h-8 text-xs" onClick={() => handleBulkToggleStatus('inativo')} disabled={isBulkTogglingStatus}>
+                {isBulkTogglingStatus ? 'Atualizando...' : 'Inativar selecionados'}
+              </Button>
+              <Button variant="outline" size="sm" className="rounded-lg border-zinc-200 h-8 text-xs" onClick={() => handleBulkToggleStatus('ativo')} disabled={isBulkTogglingStatus}>
+                {isBulkTogglingStatus ? 'Atualizando...' : 'Reativar selecionados'}
+              </Button>
+              <Button variant="destructive" size="sm" className="rounded-lg h-8 text-xs" onClick={() => setIsBulkDeleteDialogOpen(true)}>
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Excluir selecionados
+              </Button>
+              <Button variant="ghost" size="sm" className="rounded-lg h-8 text-xs text-zinc-500" onClick={clearSelection}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
         <CardContent className="p-0">
           <Table
             containerClassName="max-h-[calc(100vh-320px)] overflow-auto custom-scrollbar"
@@ -899,6 +1075,16 @@ export default function ColaboradoresPage() {
           >
             <TableHeader>
               <TableRow className="hover:bg-transparent border-none">
+                <TableHead className="sticky top-0 z-50 bg-white py-4 px-6 w-10 border-b border-zinc-200 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-zinc-300 accent-emerald-600 cursor-pointer"
+                    checked={allOnPageSelected}
+                    ref={(el) => { if (el) el.indeterminate = someOnPageSelected; }}
+                    onChange={toggleSelectAllOnPage}
+                    aria-label="Selecionar todos os colaboradores desta página"
+                  />
+                </TableHead>
                 <TableHead className="sticky top-0 z-50 bg-white py-4 px-6 cursor-pointer text-[11px] font-bold uppercase tracking-wider text-zinc-500 border-b border-zinc-200 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]" onClick={() => handleSort('matricula')}>
                   <div className="flex items-center gap-1">Matrícula <SortIcon column="matricula" /></div>
                 </TableHead>
@@ -920,7 +1106,7 @@ export default function ColaboradoresPage() {
             <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-20">
+                    <TableCell colSpan={7} className="text-center py-20">
                       <div className="flex flex-col items-center gap-3">
                         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full" />
                         <span className="text-xs font-medium text-zinc-500">Carregando dados...</span>
@@ -929,18 +1115,27 @@ export default function ColaboradoresPage() {
                   </TableRow>
                 ) : colaboradores.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-20 text-zinc-400 text-sm">
+                    <TableCell colSpan={7} className="text-center py-20 text-zinc-400 text-sm">
                       Nenhum registro encontrado.
                     </TableCell>
                   </TableRow>
                 ) : (
                   colaboradores.map((colab, idx) => (
-                    <motion.tr 
+                    <motion.tr
                       key={colab.id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className="group border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors"
+                      className={`group border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors ${selectedIds.has(colab.id) ? 'bg-emerald-50/50' : ''}`}
                     >
+                      <TableCell className="px-6 py-4">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-zinc-300 accent-emerald-600 cursor-pointer"
+                          checked={selectedIds.has(colab.id)}
+                          onChange={() => toggleSelectOne(colab.id)}
+                          aria-label={`Selecionar colaborador ${colab.nome}`}
+                        />
+                      </TableCell>
                       <TableCell className="px-6 py-4 font-mono text-xs text-zinc-500">#{colab.matricula}</TableCell>
                       <TableCell className="px-6 py-4">
                         <div className="flex items-center gap-3">

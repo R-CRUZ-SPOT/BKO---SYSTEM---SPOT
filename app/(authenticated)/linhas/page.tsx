@@ -42,6 +42,12 @@ export default function LinhasPage() {
   const [linhaToDelete, setLinhaToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Seleção em massa
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkUnlinking, setIsBulkUnlinking] = useState(false);
+
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 15;
@@ -150,6 +156,117 @@ export default function LinhasPage() {
     return sortDirection === 'asc' ? <ArrowUp className="ml-2 w-4 h-4 inline-block" /> : <ArrowDown className="ml-2 w-4 h-4 inline-block" />;
   };
 
+  // Seleção em massa: helpers baseados na página atual (linhas) e no total filtrado (processedData)
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allOnPageSelected = linhas.length > 0 && linhas.every(l => selectedIds.has(l.id));
+  const someOnPageSelected = !allOnPageSelected && linhas.some(l => selectedIds.has(l.id));
+
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        linhas.forEach(l => next.delete(l.id));
+      } else {
+        linhas.forEach(l => next.add(l.id));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => setSelectedIds(new Set(processedData.map(l => l.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkDesvincular = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsBulkUnlinking(true);
+    try {
+      const { error } = await supabase.from('linhas').update({ colaborador_id: null }).in('id', ids);
+      if (error) throw error;
+
+      await supabase.from('vinculos')
+        .update({ data_fim: new Date().toISOString() })
+        .in('linha_id', ids)
+        .is('data_fim', null);
+
+      toast.success(`${ids.length} linha(s) desvinculada(s) com sucesso!`);
+      setSelectedIds(new Set());
+      dataCache.invalidate('linhas');
+      dataCache.invalidate('colaboradores');
+      loadLinhas();
+    } catch (error: any) {
+      toast.error('Erro ao desvincular em massa: ' + error.message);
+    } finally {
+      setIsBulkUnlinking(false);
+    }
+  };
+
+  const confirmBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const { error } = await supabase.from('linhas').delete().in('id', ids);
+      if (error) {
+        if (error.code === '23503') {
+          throw new Error('Uma ou mais linhas selecionadas possuem histórico de vínculos e não puderam ser excluídas.');
+        }
+        throw error;
+      }
+
+      toast.success(`${ids.length} linha(s) excluída(s) com sucesso!`);
+      setIsBulkDeleteDialogOpen(false);
+      setSelectedIds(new Set());
+      dataCache.invalidate('linhas');
+      dataCache.invalidate('dashboard_stats');
+      loadLinhas();
+    } catch (error: any) {
+      toast.error('Erro ao excluir em massa: ' + error.message);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  // Tenta identificar DDD + número mesmo quando vêm juntos na mesma célula
+  // (ex: "(11) 9408-0775") e quando a coluna DDD está vazia ou ausente.
+  const parseTelefone = (rawNumero: any, rawDdd: any) => {
+    const numeroStr = rawNumero?.toString().trim() || '';
+    const dddColuna = rawDdd?.toString().replace(/\D/g, '') || '';
+    const digits = numeroStr.replace(/\D/g, '');
+
+    // Caso 1: a coluna DDD foi preenchida corretamente (2 dígitos)
+    if (dddColuna.length === 2) {
+      // Se o número também trouxer o DDD embutido (duplicado), remove o prefixo
+      // para não gravar "(11) 9408-0775" com DDD "11" ao mesmo tempo.
+      let numeroLimpo = numeroStr;
+      if (digits.length >= 10 && digits.startsWith(dddColuna)) {
+        numeroLimpo = numeroStr.replace(/^\(?\s*\d{2}\s*\)?[\s-]*/, '');
+      }
+      return { ddd: dddColuna, numero: numeroLimpo, status: 'ok' as const };
+    }
+
+    // Caso 2: DDD não veio em coluna própria, mas dá pra extrair do número
+    // (10 dígitos = DDD + fixo de 8; 11 dígitos = DDD + celular de 9)
+    if (digits.length === 10 || digits.length === 11) {
+      const dddExtraido = digits.slice(0, 2);
+      const restante = digits.slice(2);
+      const numeroFormatado = restante.length === 9
+        ? `${restante.slice(0, 5)}-${restante.slice(5)}`
+        : `${restante.slice(0, 4)}-${restante.slice(4)}`;
+      return { ddd: dddExtraido, numero: numeroFormatado, status: 'auto' as const };
+    }
+
+    // Caso 3: não há como identificar o DDD (nem coluna, nem embutido)
+    return { ddd: '', numero: numeroStr, status: 'sem_ddd' as const };
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -164,8 +281,10 @@ export default function LinhasPage() {
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws);
 
-        // Estrutura: DDD, LINHA TELEFONICA, MATRICULA (opcional)
+        // Estrutura: DDD (opcional se já vier no número), LINHA TELEFONICA, MATRICULA (opcional)
         const toInsert: any[] = [];
+        const linhasAutoDetectadas: string[] = [];
+        const linhasSemDdd: string[] = [];
 
         // Para lidar com matriculas, precisamos buscar os IDs dos colaboradores
         const matriculasPresentes = data.map((r:any) => r.MATRICULA?.toString()).filter(Boolean);
@@ -178,17 +297,43 @@ export default function LinhasPage() {
            }
         }
 
-        for (const row of data as any[]) {
-          if (!row['LINHA TELEFONICA']) continue;
-          
-          let colabId = null;
-          if (row.MATRICULA && mapColaboradores[row.MATRICULA.toString()]) {
-             colabId = mapColaboradores[row.MATRICULA.toString()];
+        // Parseia cada linha (extraindo DDD embutido quando necessário) antes de
+        // consultar os registros existentes, já que a chave de busca é o número "limpo"
+        const linhasParsed = (data as any[])
+          .filter(row => row['LINHA TELEFONICA'])
+          .map(row => ({ row, parsed: parseTelefone(row['LINHA TELEFONICA'], row.DDD) }));
+
+        // Busca as linhas já existentes (por numero) para não perder dados
+        // que não foram informados na planilha (ex: ddd, vínculo atual)
+        const numerosPresentes = linhasParsed.map(({ parsed }) => parsed.numero).filter(Boolean);
+        let mapExistentes: Record<string, { ddd: string; colaborador_id: string | null }> = {};
+        if (numerosPresentes.length > 0) {
+          const { data: existentes } = await supabase
+            .from('linhas')
+            .select('numero, ddd, colaborador_id')
+            .in('numero', numerosPresentes);
+          if (existentes) {
+            mapExistentes = existentes.reduce((acc, l) => ({ ...acc, [l.numero]: { ddd: l.ddd, colaborador_id: l.colaborador_id } }), {});
+          }
+        }
+
+        for (const { row, parsed } of linhasParsed) {
+          const { numero, ddd, status } = parsed;
+          const existente = mapExistentes[numero];
+
+          if (status === 'auto') linhasAutoDetectadas.push(`(${ddd}) ${numero}`);
+          if (status === 'sem_ddd') linhasSemDdd.push(numero);
+
+          // Só atualiza o vínculo se a MATRICULA foi informada na planilha.
+          // Caso contrário, mantém o vínculo atual da linha (se existir).
+          let colabId: string | null = existente?.colaborador_id ?? null;
+          if (row.MATRICULA) {
+            colabId = mapColaboradores[row.MATRICULA.toString()] ?? null;
           }
 
           toInsert.push({
-            numero: row['LINHA TELEFONICA'].toString(),
-            ddd: row.DDD?.toString() || '',
+            numero,
+            ddd: ddd || existente?.ddd || '',
             colaborador_id: colabId
           });
         }
@@ -198,13 +343,29 @@ export default function LinhasPage() {
           return;
         }
 
+        // ignoreDuplicates precisa ser false para que linhas com numero já
+        // cadastrado sejam efetivamente ATUALIZADAS (ex: vínculo com colaborador).
         const { error } = await supabase
           .from('linhas')
-          .upsert(toInsert, { onConflict: 'numero', ignoreDuplicates: true });
+          .upsert(toInsert, { onConflict: 'numero', ignoreDuplicates: false });
 
         if (error) throw error;
         
         toast.success(`${toInsert.length} linhas processadas.`);
+
+        if (linhasAutoDetectadas.length > 0) {
+          toast.info(
+            `DDD identificado automaticamente em ${linhasAutoDetectadas.length} linha(s): ${linhasAutoDetectadas.slice(0, 5).join(', ')}${linhasAutoDetectadas.length > 5 ? '...' : ''}. Confira se ficou correto.`,
+            { duration: 8000 }
+          );
+        }
+        if (linhasSemDdd.length > 0) {
+          toast.warning(
+            `${linhasSemDdd.length} linha(s) importada(s) SEM DDD (não foi possível identificar): ${linhasSemDdd.slice(0, 5).join(', ')}${linhasSemDdd.length > 5 ? '...' : ''}. Edite manualmente.`,
+            { duration: 10000 }
+          );
+        }
+
         dataCache.invalidate('linhas');
         dataCache.invalidate('dashboard_stats');
         loadLinhas();
@@ -416,6 +577,27 @@ export default function LinhasPage() {
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const templateData = [
+        { DDD: '11', 'LINHA TELEFONICA': '987654321', MATRICULA: '00123' },
+        { DDD: '', 'LINHA TELEFONICA': '(21) 91234-5678', MATRICULA: '' }
+      ];
+
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      ws['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 14 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+
+      XLSX.writeFile(wb, 'Modelo_Importacao_Linhas.xlsx');
+      toast.success('Modelo baixado com sucesso!');
+    } catch (error) {
+      console.error(error);
+      toast.error('Erro ao gerar modelo.');
+    }
+  };
+
   const colabsFiltrados = colaboradoresAtivos.filter(c => 
     c.nome.toLowerCase().includes(searchColabDialog.toLowerCase()) || 
     c.matricula.toLowerCase().includes(searchColabDialog.toLowerCase())
@@ -439,6 +621,10 @@ export default function LinhasPage() {
           <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={() => fileInputRef.current?.click()}>
             <Upload className="w-4 h-4 mr-2 text-zinc-500" />
             Importar
+          </Button>
+          <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={handleDownloadTemplate}>
+            <Download className="w-4 h-4 mr-2 text-zinc-500" />
+            Modelo
           </Button>
           <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={handleExportExcel}>
             <Download className="w-4 h-4 mr-2 text-zinc-500" />
@@ -553,6 +739,30 @@ export default function LinhasPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar Exclusão em Massa</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-500">
+              Deseja realmente excluir <strong>{selectedIds.size}</strong> linha(s) telefônica(s) selecionada(s)?
+            </p>
+            <p className="text-xs text-red-500 mt-2 italic">
+              Esta ação não pode ser desfeita e removerá os registros destas linhas de qualquer histórico.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsBulkDeleteDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={confirmBulkDelete} disabled={isBulkDeleting}>
+              {isBulkDeleting ? 'Excluindo...' : `Sim, Excluir ${selectedIds.size}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Card className="border-none shadow-sm overflow-hidden bg-white/50 backdrop-blur-sm">
         <CardHeader className="py-4 px-6 border-b border-zinc-100 bg-white/80">
           <div className="relative max-w-sm">
@@ -565,6 +775,30 @@ export default function LinhasPage() {
             />
           </div>
         </CardHeader>
+        {selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-emerald-50 border-b border-emerald-100">
+            <span className="text-xs font-bold text-emerald-800">
+              {selectedIds.size} selecionada(s)
+              {allOnPageSelected && totalCount > linhas.length && (
+                <button type="button" onClick={selectAllFiltered} className="ml-2 underline text-emerald-700 hover:text-emerald-900 font-medium">
+                  Selecionar todas as {totalCount} linhas filtradas
+                </button>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="rounded-lg border-zinc-200 h-8 text-xs" onClick={handleBulkDesvincular} disabled={isBulkUnlinking}>
+                {isBulkUnlinking ? 'Desvinculando...' : 'Desvincular selecionadas'}
+              </Button>
+              <Button variant="destructive" size="sm" className="rounded-lg h-8 text-xs" onClick={() => setIsBulkDeleteDialogOpen(true)}>
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Excluir selecionadas
+              </Button>
+              <Button variant="ghost" size="sm" className="rounded-lg h-8 text-xs text-zinc-500" onClick={clearSelection}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
         <CardContent className="p-0">
           <Table
             containerClassName="max-h-[calc(100vh-320px)] overflow-auto custom-scrollbar"
@@ -572,6 +806,16 @@ export default function LinhasPage() {
           >
             <TableHeader>
               <TableRow className="hover:bg-transparent border-none">
+                <TableHead className="sticky top-0 z-50 bg-white py-4 px-6 w-10 border-b border-zinc-200 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-zinc-300 accent-emerald-600 cursor-pointer"
+                    checked={allOnPageSelected}
+                    ref={(el) => { if (el) el.indeterminate = someOnPageSelected; }}
+                    onChange={toggleSelectAllOnPage}
+                    aria-label="Selecionar todas as linhas desta página"
+                  />
+                </TableHead>
                 <TableHead className="sticky top-0 z-50 bg-white py-4 px-6 cursor-pointer text-[11px] font-bold uppercase tracking-wider text-zinc-500 border-b border-zinc-200 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]" onClick={() => handleSort('ddd')}>
                   <div className="flex items-center gap-1">DDD <SortIcon column="ddd" /></div>
                 </TableHead>
@@ -590,7 +834,7 @@ export default function LinhasPage() {
             <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-20">
+                    <TableCell colSpan={6} className="text-center py-20">
                       <div className="flex flex-col items-center gap-3">
                         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full" />
                         <span className="text-xs font-medium text-zinc-500">Carregando linhas...</span>
@@ -599,18 +843,27 @@ export default function LinhasPage() {
                   </TableRow>
                 ) : linhas.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-20 text-zinc-400 text-sm">
+                    <TableCell colSpan={6} className="text-center py-20 text-zinc-400 text-sm">
                       Nenhuma linha registrada.
                     </TableCell>
                   </TableRow>
                 ) : (
                   linhas.map((linha, idx) => (
-                    <motion.tr 
+                    <motion.tr
                       key={linha.id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className="group border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors"
+                      className={`group border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors ${selectedIds.has(linha.id) ? 'bg-emerald-50/50' : ''}`}
                     >
+                      <TableCell className="px-6 py-4">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-zinc-300 accent-emerald-600 cursor-pointer"
+                          checked={selectedIds.has(linha.id)}
+                          onChange={() => toggleSelectOne(linha.id)}
+                          aria-label={`Selecionar linha ${linha.numero}`}
+                        />
+                      </TableCell>
                       <TableCell className="px-6 py-4 font-mono text-xs text-zinc-500">
                         <div className="flex items-center gap-2">
                           <span className="text-zinc-400">({linha.ddd})</span>

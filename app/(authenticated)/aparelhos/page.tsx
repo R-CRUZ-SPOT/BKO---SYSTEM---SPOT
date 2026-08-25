@@ -42,6 +42,12 @@ export default function AparelhosPage() {
   const [aparelhoToDelete, setAparelhoToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Seleção em massa
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkUnlinking, setIsBulkUnlinking] = useState(false);
+
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 15;
@@ -150,6 +156,84 @@ export default function AparelhosPage() {
     return sortDirection === 'asc' ? <ArrowUp className="ml-2 w-4 h-4 inline-block" /> : <ArrowDown className="ml-2 w-4 h-4 inline-block" />;
   };
 
+  // Seleção em massa: helpers baseados na página atual (aparelhos) e no total filtrado (processedData)
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allOnPageSelected = aparelhos.length > 0 && aparelhos.every(a => selectedIds.has(a.id));
+  const someOnPageSelected = !allOnPageSelected && aparelhos.some(a => selectedIds.has(a.id));
+
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        aparelhos.forEach(a => next.delete(a.id));
+      } else {
+        aparelhos.forEach(a => next.add(a.id));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => setSelectedIds(new Set(processedData.map(a => a.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkDesvincular = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsBulkUnlinking(true);
+    try {
+      const { error } = await supabase.from('aparelhos').update({ colaborador_id: null }).in('id', ids);
+      if (error) throw error;
+
+      await supabase.from('vinculos')
+        .update({ data_fim: new Date().toISOString() })
+        .in('aparelho_id', ids)
+        .is('data_fim', null);
+
+      toast.success(`${ids.length} aparelho(s) desvinculado(s) com sucesso!`);
+      setSelectedIds(new Set());
+      dataCache.invalidate('aparelhos');
+      dataCache.invalidate('colaboradores');
+      loadAparelhos();
+    } catch (error: any) {
+      toast.error('Erro ao desvincular em massa: ' + error.message);
+    } finally {
+      setIsBulkUnlinking(false);
+    }
+  };
+
+  const confirmBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const { error } = await supabase.from('aparelhos').delete().in('id', ids);
+      if (error) {
+        if (error.code === '23503') {
+          throw new Error('Um ou mais aparelhos selecionados possuem histórico de vínculos e não puderam ser excluídos.');
+        }
+        throw error;
+      }
+
+      toast.success(`${ids.length} aparelho(s) excluído(s) com sucesso!`);
+      setIsBulkDeleteDialogOpen(false);
+      setSelectedIds(new Set());
+      dataCache.invalidate('aparelhos');
+      dataCache.invalidate('dashboard_stats');
+      loadAparelhos();
+    } catch (error: any) {
+      toast.error('Erro ao excluir em massa: ' + error.message);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -178,17 +262,36 @@ export default function AparelhosPage() {
            }
         }
 
+        // Busca os aparelhos já existentes (por IMEI) para não perder dados
+        // que não foram informados na planilha (ex: modelo, vínculo atual)
+        const imeisPresentes = (data as any[]).map(r => r.IMEI?.toString()).filter(Boolean);
+        let mapExistentes: Record<string, { modelo: string; colaborador_id: string | null }> = {};
+        if (imeisPresentes.length > 0) {
+          const { data: existentes } = await supabase
+            .from('aparelhos')
+            .select('imei, modelo, colaborador_id')
+            .in('imei', imeisPresentes);
+          if (existentes) {
+            mapExistentes = existentes.reduce((acc, a) => ({ ...acc, [a.imei]: { modelo: a.modelo, colaborador_id: a.colaborador_id } }), {});
+          }
+        }
+
         for (const row of data as any[]) {
           if (!row.IMEI) continue;
-          
-          let colabId = null;
-          if (row.MATRICULA && mapColaboradores[row.MATRICULA.toString()]) {
-             colabId = mapColaboradores[row.MATRICULA.toString()];
+
+          const imei = row.IMEI.toString();
+          const existente = mapExistentes[imei];
+
+          // Só atualiza o vínculo se a MATRICULA foi informada na planilha.
+          // Caso contrário, mantém o vínculo atual do aparelho (se existir).
+          let colabId: string | null = existente?.colaborador_id ?? null;
+          if (row.MATRICULA) {
+            colabId = mapColaboradores[row.MATRICULA.toString()] ?? null;
           }
 
           toInsert.push({
-            imei: row.IMEI.toString(),
-            modelo: row.MODELO || 'Desconhecido',
+            imei,
+            modelo: row.MODELO || existente?.modelo || 'Desconhecido',
             colaborador_id: colabId
           });
         }
@@ -198,9 +301,12 @@ export default function AparelhosPage() {
           return;
         }
 
+        // ignoreDuplicates precisa ser false para que aparelhos com IMEI já
+        // cadastrado sejam efetivamente ATUALIZADOS (ex: vínculo com colaborador).
+        // Com ignoreDuplicates:true a linha era simplesmente ignorada.
         const { error } = await supabase
           .from('aparelhos')
-          .upsert(toInsert, { onConflict: 'imei', ignoreDuplicates: true });
+          .upsert(toInsert, { onConflict: 'imei', ignoreDuplicates: false });
 
         if (error) throw error;
         
@@ -416,6 +522,27 @@ export default function AparelhosPage() {
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const templateData = [
+        { MODELO: 'Samsung Galaxy A25', IMEI: '123456789012345', MATRICULA: '00123' },
+        { MODELO: 'iPhone 13', IMEI: '987654321098765', MATRICULA: '' }
+      ];
+
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      ws['!cols'] = [{ wch: 22 }, { wch: 20 }, { wch: 14 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+
+      XLSX.writeFile(wb, 'Modelo_Importacao_Aparelhos.xlsx');
+      toast.success('Modelo baixado com sucesso!');
+    } catch (error) {
+      console.error(error);
+      toast.error('Erro ao gerar modelo.');
+    }
+  };
+
   const colabsFiltrados = colaboradoresAtivos.filter(c => 
     c.nome.toLowerCase().includes(searchColabDialog.toLowerCase()) || 
     c.matricula.toLowerCase().includes(searchColabDialog.toLowerCase())
@@ -439,6 +566,10 @@ export default function AparelhosPage() {
           <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={() => fileInputRef.current?.click()}>
             <Upload className="w-4 h-4 mr-2 text-zinc-500" />
             Importar
+          </Button>
+          <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={handleDownloadTemplate}>
+            <Download className="w-4 h-4 mr-2 text-zinc-500" />
+            Modelo
           </Button>
           <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={handleExportExcel}>
             <Download className="w-4 h-4 mr-2 text-zinc-500" />
@@ -547,6 +678,30 @@ export default function AparelhosPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar Exclusão em Massa</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-500">
+              Deseja realmente excluir <strong>{selectedIds.size}</strong> aparelho(s) selecionado(s)?
+            </p>
+            <p className="text-xs text-red-500 mt-2 italic">
+              Esta ação não pode ser desfeita.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsBulkDeleteDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={confirmBulkDelete} disabled={isBulkDeleting}>
+              {isBulkDeleting ? 'Excluindo...' : `Sim, Excluir ${selectedIds.size}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Card className="border-none shadow-sm overflow-hidden bg-white/50 backdrop-blur-sm">
         <CardHeader className="py-4 px-6 border-b border-zinc-100 bg-white/80">
           <div className="relative max-w-sm">
@@ -559,6 +714,30 @@ export default function AparelhosPage() {
             />
           </div>
         </CardHeader>
+        {selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-emerald-50 border-b border-emerald-100">
+            <span className="text-xs font-bold text-emerald-800">
+              {selectedIds.size} selecionado(s)
+              {allOnPageSelected && totalCount > aparelhos.length && (
+                <button type="button" onClick={selectAllFiltered} className="ml-2 underline text-emerald-700 hover:text-emerald-900 font-medium">
+                  Selecionar todos os {totalCount} aparelhos filtrados
+                </button>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="rounded-lg border-zinc-200 h-8 text-xs" onClick={handleBulkDesvincular} disabled={isBulkUnlinking}>
+                {isBulkUnlinking ? 'Desvinculando...' : 'Desvincular selecionados'}
+              </Button>
+              <Button variant="destructive" size="sm" className="rounded-lg h-8 text-xs" onClick={() => setIsBulkDeleteDialogOpen(true)}>
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Excluir selecionados
+              </Button>
+              <Button variant="ghost" size="sm" className="rounded-lg h-8 text-xs text-zinc-500" onClick={clearSelection}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
         <CardContent className="p-0">
           <Table
             containerClassName="max-h-[calc(100vh-320px)] overflow-auto custom-scrollbar"
@@ -566,6 +745,16 @@ export default function AparelhosPage() {
           >
             <TableHeader>
               <TableRow className="hover:bg-transparent border-none">
+                <TableHead className="sticky top-0 z-50 bg-white py-4 px-6 w-10 border-b border-zinc-200 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-zinc-300 accent-emerald-600 cursor-pointer"
+                    checked={allOnPageSelected}
+                    ref={(el) => { if (el) el.indeterminate = someOnPageSelected; }}
+                    onChange={toggleSelectAllOnPage}
+                    aria-label="Selecionar todos os aparelhos desta página"
+                  />
+                </TableHead>
                 <TableHead className="sticky top-0 z-50 bg-white py-4 px-6 cursor-pointer text-[11px] font-bold uppercase tracking-wider text-zinc-500 border-b border-zinc-200 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]" onClick={() => handleSort('imei')}>
                   <div className="flex items-center gap-1">IMEI <SortIcon column="imei" /></div>
                 </TableHead>
@@ -584,7 +773,7 @@ export default function AparelhosPage() {
             <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-20">
+                    <TableCell colSpan={6} className="text-center py-20">
                       <div className="flex flex-col items-center gap-3">
                         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full" />
                         <span className="text-xs font-medium text-zinc-500">Carregando dispositivos...</span>
@@ -593,18 +782,27 @@ export default function AparelhosPage() {
                   </TableRow>
                 ) : aparelhos.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-20 text-zinc-400 text-sm">
+                    <TableCell colSpan={6} className="text-center py-20 text-zinc-400 text-sm">
                       Nenhum dispositivo registrado.
                     </TableCell>
                   </TableRow>
                 ) : (
                   aparelhos.map((aparelho, idx) => (
-                    <motion.tr 
+                    <motion.tr
                       key={aparelho.id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className="group border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors"
+                      className={`group border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors ${selectedIds.has(aparelho.id) ? 'bg-emerald-50/50' : ''}`}
                     >
+                      <TableCell className="px-6 py-4">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-zinc-300 accent-emerald-600 cursor-pointer"
+                          checked={selectedIds.has(aparelho.id)}
+                          onChange={() => toggleSelectOne(aparelho.id)}
+                          aria-label={`Selecionar aparelho ${aparelho.imei}`}
+                        />
+                      </TableCell>
                       <TableCell className="px-6 py-4 font-mono text-xs text-zinc-500">
                         <div className="flex items-center gap-2">
                           <Smartphone className="w-3.5 h-3.5 text-zinc-400" />

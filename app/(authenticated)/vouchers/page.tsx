@@ -315,6 +315,27 @@ export default function VouchersPage() {
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const templateData = [
+        { Produto: 'Vale Combustível', Valor: '50.00', Validade: '31/12/2026', 'Código': 'ABC123XYZ', Matricula: '' },
+        { Produto: 'Vale Presente', Valor: '100.00', Validade: '31/12/2026', 'Código': 'DEF456UVW', Matricula: '00123' }
+      ];
+
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      ws['!cols'] = [{ wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+
+      XLSX.writeFile(wb, 'Modelo_Importacao_Vouchers.xlsx');
+      toast.success('Modelo baixado com sucesso!');
+    } catch (error) {
+      console.error(error);
+      toast.error('Erro ao gerar modelo.');
+    }
+  };
+
   const openForm = (voucher: any = null) => {
     if (voucher) {
       setEditingVoucher(voucher);
@@ -495,6 +516,14 @@ export default function VouchersPage() {
           >
             <Upload className="w-4 h-4 mr-2 text-zinc-500" />
             Importar CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            className="rounded-xl border-zinc-200 hover:bg-zinc-50"
+            onClick={handleDownloadTemplate}
+          >
+            <Download className="w-4 h-4 mr-2 text-zinc-500" />
+            Modelo
           </Button>
           <Button 
             variant="outline" 
