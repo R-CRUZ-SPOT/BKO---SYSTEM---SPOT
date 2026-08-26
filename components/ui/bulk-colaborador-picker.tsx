@@ -86,8 +86,8 @@ export function BulkColaboradorPicker({ items, selectedIds, onChange, emptyMessa
 
       <div className="grid grid-cols-2 gap-2">
         <Select value={supervisorFilter} onValueChange={(v: string | null) => v && setSupervisorFilter(v)}>
-          <SelectTrigger className="h-10 bg-zinc-50/50 border-zinc-200">
-            <SelectValue placeholder="Supervisor" />
+          <SelectTrigger className="h-10 w-full min-w-0 bg-zinc-50/50 border-zinc-200">
+            <SelectValue placeholder="Supervisor" className="truncate" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_VALUE}>Todos os supervisores</SelectItem>
@@ -98,8 +98,8 @@ export function BulkColaboradorPicker({ items, selectedIds, onChange, emptyMessa
         </Select>
 
         <Select value={ufFilter} onValueChange={(v: string | null) => v && setUfFilter(v)}>
-          <SelectTrigger className="h-10 bg-zinc-50/50 border-zinc-200">
-            <SelectValue placeholder="UF" />
+          <SelectTrigger className="h-10 w-full min-w-0 bg-zinc-50/50 border-zinc-200">
+            <SelectValue placeholder="UF" className="truncate" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_VALUE}>Todas as UFs</SelectItem>

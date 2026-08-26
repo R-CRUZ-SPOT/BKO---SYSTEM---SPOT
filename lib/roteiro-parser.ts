@@ -12,10 +12,12 @@ const HEADER_MAP: Record<string, keyof RoteiroEntry> = {
   NOME: 'nome',
   NOM_PESSOA_COMPLETO: 'nom_pessoa_completo',
   REDE: 'rede',
+  DES_REDE: 'rede',
   NOM_FANTASIA: 'nom_fantasia',
   END_LOGRADOURO: 'end_logradouro',
   SUPERVISOR: 'supervisor',
   UF: 'uf',
+  DES_UF: 'uf',
 };
 
 export async function parseRoteiroFile(file: File): Promise<RoteiroEntry[]> {
