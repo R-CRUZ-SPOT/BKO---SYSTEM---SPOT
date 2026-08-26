@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
-import { FileUp, Printer, FileText, Search, User, ChevronDown, Check, PackageCheck } from 'lucide-react';
+import { FileUp, Printer, FileText, Search, User, ChevronDown, Check, PackageCheck, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -161,6 +161,8 @@ export default function CartasPage() {
   const [fileName, setFileName] = useState('');
 
   const [lojasVinculadas, setLojasVinculadas] = useState<Loja[]>([]);
+  const [lojasExtras, setLojasExtras] = useState<Loja[]>([]);
+  const [lojaSearchTerm, setLojaSearchTerm] = useState('');
   const [cartaGerada, setCartaGerada] = useState(false);
 
   const [modo, setModo] = useState<'individual' | 'massa'>('individual');
@@ -201,6 +203,8 @@ export default function CartasPage() {
     setSelectedColaboradorId('');
     setSelectedLojaIds([]);
     setBulkSelectedIds(new Set());
+    setLojasExtras([]);
+    setLojaSearchTerm('');
 
     try {
       const entries = await parseRoteiroFile(file);
@@ -221,13 +225,40 @@ export default function CartasPage() {
 
       setLojasVinculadas(dedupeLojas(matchColaboradorRows(roteiro, c.nome)));
       setSelectedLojaIds([]);
+      setLojasExtras([]);
+      setLojaSearchTerm('');
       setCartaGerada(false);
     } else {
       setLojasVinculadas([]);
       setSelectedLojaIds([]);
+      setLojasExtras([]);
+      setLojaSearchTerm('');
       setCartaGerada(false);
     }
   }, [selectedColaboradorId, roteiro, colaboradores]);
+
+  const allLojas = useMemo(() => dedupeLojas(roteiro), [roteiro]);
+  const lojasDisponiveis = useMemo(() => [...lojasVinculadas, ...lojasExtras], [lojasVinculadas, lojasExtras]);
+
+  const lojaSearchResults = useMemo(() => {
+    const term = lojaSearchTerm.trim().toLowerCase();
+    if (!term) return [];
+    const jaDisponiveis = new Set(lojasDisponiveis.map(l => l.id));
+    return allLojas
+      .filter(l => !jaDisponiveis.has(l.id) && (l.nomFantasia.toLowerCase().includes(term) || l.rede.toLowerCase().includes(term)))
+      .slice(0, 8);
+  }, [lojaSearchTerm, allLojas, lojasDisponiveis]);
+
+  const handleAddExtraLoja = (loja: Loja) => {
+    setLojasExtras(prev => [...prev, loja]);
+    setSelectedLojaIds(prev => [...prev, loja.id]);
+    setLojaSearchTerm('');
+  };
+
+  const handleRemoveExtraLoja = (lojaId: string) => {
+    setLojasExtras(prev => prev.filter(l => l.id !== lojaId));
+    setSelectedLojaIds(prev => prev.filter(id => id !== lojaId));
+  };
 
   const handleGerarCarta = () => {
     if (!selectedColaboradorId || selectedLojaIds.length === 0) {
@@ -238,7 +269,7 @@ export default function CartasPage() {
   };
 
   const selectedColab = colaboradores.find(c => c.id === selectedColaboradorId);
-  const selectedLojas = lojasVinculadas.filter(l => selectedLojaIds.includes(l.id));
+  const selectedLojas = lojasDisponiveis.filter(l => selectedLojaIds.includes(l.id));
 
   const getFormatDate = () => {
     const months = [
@@ -433,9 +464,9 @@ export default function CartasPage() {
                 <div>
                   <label className="block text-xs font-bold text-zinc-700 uppercase tracking-tighter mb-2 flex justify-between items-center">
                     <span>Lojas (Roteiro)</span>
-                    {lojasVinculadas.length > 0 && (
+                    {lojasDisponiveis.length > 0 && (
                       <span className="text-[10px] text-emerald-600 font-bold px-2 py-0.5 bg-emerald-50 rounded-full">
-                        {lojasVinculadas.length} encontradas
+                        {lojasDisponiveis.length} encontradas
                       </span>
                     )}
                   </label>
@@ -443,7 +474,7 @@ export default function CartasPage() {
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar border border-zinc-200 rounded-xl p-3 bg-zinc-50">
                     {!selectedColaboradorId ? (
                       <p className="text-xs text-zinc-400 italic">Selecione um promotor primeiro...</p>
-                    ) : lojasVinculadas.length === 0 ? (
+                    ) : lojasDisponiveis.length === 0 ? (
                       <p className="text-xs text-zinc-400 italic">Nenhuma loja encontrada</p>
                     ) : (
                       <>
@@ -451,10 +482,10 @@ export default function CartasPage() {
                           <input
                             type="checkbox"
                             id="select-all-lojas"
-                            checked={selectedLojaIds.length === lojasVinculadas.length}
+                            checked={selectedLojaIds.length === lojasDisponiveis.length}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setSelectedLojaIds(lojasVinculadas.map(l => l.id));
+                                setSelectedLojaIds(lojasDisponiveis.map(l => l.id));
                               } else {
                                 setSelectedLojaIds([]);
                               }
@@ -465,34 +496,89 @@ export default function CartasPage() {
                             Selecionar Todas
                           </label>
                         </div>
-                        {lojasVinculadas.map(l => (
-                          <div key={l.id} className="flex items-center gap-2 hover:bg-zinc-100 p-1 rounded transition-colors">
-                            <input
-                              type="checkbox"
-                              id={`loja-${l.id}`}
-                              checked={selectedLojaIds.includes(l.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedLojaIds([...selectedLojaIds, l.id]);
-                                } else {
-                                  setSelectedLojaIds(selectedLojaIds.filter(id => id !== l.id));
-                                }
-                              }}
-                              className="w-4 h-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
-                            />
-                            <label htmlFor={`loja-${l.id}`} className="text-sm font-medium text-zinc-700 cursor-pointer flex-1 line-clamp-1">
-                              {l.rede} - {l.nomFantasia}
-                            </label>
-                          </div>
-                        ))}
+                        {lojasDisponiveis.map(l => {
+                          const isExtra = lojasExtras.some(e => e.id === l.id);
+                          return (
+                            <div key={l.id} className="flex items-center gap-2 hover:bg-zinc-100 p-1 rounded transition-colors">
+                              <input
+                                type="checkbox"
+                                id={`loja-${l.id}`}
+                                checked={selectedLojaIds.includes(l.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedLojaIds([...selectedLojaIds, l.id]);
+                                  } else {
+                                    setSelectedLojaIds(selectedLojaIds.filter(id => id !== l.id));
+                                  }
+                                }}
+                                className="w-4 h-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <label htmlFor={`loja-${l.id}`} className="text-sm font-medium text-zinc-700 cursor-pointer flex-1 line-clamp-1">
+                                {l.rede} - {l.nomFantasia}
+                              </label>
+                              {isExtra && (
+                                <>
+                                  <span className="text-[9px] text-amber-600 font-bold uppercase bg-amber-50 px-1.5 py-0.5 rounded shrink-0">
+                                    Fora da base
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveExtraLoja(l.id)}
+                                    className="text-zinc-400 hover:text-rose-500 shrink-0"
+                                    title="Remover loja"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
                       </>
                     )}
                   </div>
 
-                  {selectedColaboradorId && lojasVinculadas.length === 0 && (
+                  {selectedColaboradorId && lojasVinculadas.length === 0 && lojasExtras.length === 0 && (
                     <p className="text-[10px] text-rose-500 mt-2 font-medium">
                       As colunas NOME ou NOM_PESSOA_COMPLETO para os registros deste promotor podem não ser equivalentes ao seu nome no sistema ou ele não possui roteiro na planilha enviada.
                     </p>
+                  )}
+
+                  {selectedColaboradorId && (
+                    <div className="mt-3 relative">
+                      <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-tighter mb-1.5">
+                        Adicionar loja de outro promotor (exceção)
+                      </label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+                        <input
+                          type="text"
+                          value={lojaSearchTerm}
+                          onChange={(e) => setLojaSearchTerm(e.target.value)}
+                          placeholder="Buscar por rede ou nome da loja..."
+                          className="w-full h-9 pl-8 pr-3 bg-white border border-zinc-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
+                      </div>
+                      {lojaSearchTerm.trim() && (
+                        <div className="mt-1 border border-zinc-200 rounded-lg bg-white shadow-sm max-h-[180px] overflow-y-auto custom-scrollbar">
+                          {lojaSearchResults.length === 0 ? (
+                            <p className="text-xs text-zinc-400 italic text-center py-4">Nenhuma loja encontrada na planilha.</p>
+                          ) : (
+                            lojaSearchResults.map(l => (
+                              <button
+                                type="button"
+                                key={l.id}
+                                onClick={() => handleAddExtraLoja(l)}
+                                className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-emerald-50 transition-colors border-b border-zinc-100 last:border-b-0"
+                              >
+                                <span className="text-xs font-medium text-zinc-700 line-clamp-1">{l.rede} - {l.nomFantasia}</span>
+                                <Plus className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
