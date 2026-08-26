@@ -28,13 +28,33 @@ export function BulkColaboradorPicker({ items, selectedIds, onChange, emptyMessa
 
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
 
-  const supervisores = useMemo(() => {
-    return Array.from(new Set(items.map(i => i.supervisor).filter((s): s is string => !!s))).sort();
-  }, [items]);
+  // Each dropdown's options are narrowed by the other's current selection, so
+  // picking a supervisor only offers the UFs they actually operate in (and vice versa).
+  const supervisorOptions = useMemo(() => {
+    const source = ufFilter !== ALL_VALUE ? items.filter(i => i.uf === ufFilter) : items;
+    return Array.from(new Set(source.map(i => i.supervisor).filter((s): s is string => !!s))).sort();
+  }, [items, ufFilter]);
 
-  const ufs = useMemo(() => {
-    return Array.from(new Set(items.map(i => i.uf).filter((u): u is string => !!u))).sort();
-  }, [items]);
+  const ufOptions = useMemo(() => {
+    const source = supervisorFilter !== ALL_VALUE ? items.filter(i => i.supervisor === supervisorFilter) : items;
+    return Array.from(new Set(source.map(i => i.uf).filter((u): u is string => !!u))).sort();
+  }, [items, supervisorFilter]);
+
+  const handleSupervisorFilterChange = (value: string) => {
+    setSupervisorFilter(value);
+    if (value !== ALL_VALUE && ufFilter !== ALL_VALUE) {
+      const stillValid = items.some(i => i.supervisor === value && i.uf === ufFilter);
+      if (!stillValid) setUfFilter(ALL_VALUE);
+    }
+  };
+
+  const handleUfFilterChange = (value: string) => {
+    setUfFilter(value);
+    if (value !== ALL_VALUE && supervisorFilter !== ALL_VALUE) {
+      const stillValid = items.some(i => i.uf === value && i.supervisor === supervisorFilter);
+      if (!stillValid) setSupervisorFilter(ALL_VALUE);
+    }
+  };
 
   const filtered = useMemo(() => {
     const term = search.toLowerCase().trim();
@@ -85,25 +105,25 @@ export function BulkColaboradorPicker({ items, selectedIds, onChange, emptyMessa
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <Select value={supervisorFilter} onValueChange={(v: string | null) => v && setSupervisorFilter(v)}>
+        <Select value={supervisorFilter} onValueChange={(v: string | null) => v && handleSupervisorFilterChange(v)}>
           <SelectTrigger className="h-10 w-full min-w-0 bg-zinc-50/50 border-zinc-200">
             <SelectValue placeholder="Supervisor" className="truncate" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_VALUE}>Todos os supervisores</SelectItem>
-            {supervisores.map(s => (
+            {supervisorOptions.map(s => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        <Select value={ufFilter} onValueChange={(v: string | null) => v && setUfFilter(v)}>
+        <Select value={ufFilter} onValueChange={(v: string | null) => v && handleUfFilterChange(v)}>
           <SelectTrigger className="h-10 w-full min-w-0 bg-zinc-50/50 border-zinc-200">
             <SelectValue placeholder="UF" className="truncate" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_VALUE}>Todas as UFs</SelectItem>
-            {ufs.map(u => (
+            {ufOptions.map(u => (
               <SelectItem key={u} value={u}>{u}</SelectItem>
             ))}
           </SelectContent>
