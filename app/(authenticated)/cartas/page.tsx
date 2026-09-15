@@ -377,7 +377,7 @@ export default function CartasPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 print:block">
 
         {/* Controls - Left Side */}
-        <div className="col-span-1 lg:col-span-4 space-y-6 print:hidden">
+        <div className="col-span-1 lg:col-span-5 space-y-6 print:hidden">
           {/* File Upload Box */}
           <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm">
             <h2 className="text-xs font-black uppercase tracking-widest text-zinc-400 mb-4 flex items-center gap-2">
@@ -513,7 +513,7 @@ export default function CartasPage() {
                                 }}
                                 className="w-4 h-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
                               />
-                              <label htmlFor={`loja-${l.id}`} className="text-sm font-medium text-zinc-700 cursor-pointer flex-1 line-clamp-1">
+                              <label htmlFor={`loja-${l.id}`} className="text-sm font-medium text-zinc-700 cursor-pointer flex-1 min-w-0 line-clamp-2">
                                 {l.rede} - {l.nomFantasia}
                               </label>
                               {isExtra && (
@@ -571,7 +571,7 @@ export default function CartasPage() {
                                 onClick={() => handleAddExtraLoja(l)}
                                 className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-emerald-50 transition-colors border-b border-zinc-100 last:border-b-0"
                               >
-                                <span className="text-xs font-medium text-zinc-700 line-clamp-1">{l.rede} - {l.nomFantasia}</span>
+                                <span className="text-xs font-medium text-zinc-700 line-clamp-2 min-w-0">{l.rede} - {l.nomFantasia}</span>
                                 <Plus className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                               </button>
                             ))
@@ -621,7 +621,7 @@ export default function CartasPage() {
         </div>
 
         {/* Preview / Print Area - Right Side */}
-        <div className="col-span-1 lg:col-span-8 print:w-full print:block">
+        <div className="col-span-1 lg:col-span-7 print:w-full print:block">
           <div className={`bg-white border border-zinc-200 shadow-sm rounded-2xl overflow-hidden transition-all duration-500 min-h-[800px] flex flex-col relative print:border-none print:shadow-none print:min-h-0 print:p-0`}>
 
             {/* Header / Actions for Preview */}
