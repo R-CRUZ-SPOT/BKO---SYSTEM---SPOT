@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, Plus, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, MoreVertical, Download, Smartphone, Phone, Cake, Filter } from 'lucide-react';
+import { Upload, Plus, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, MoreVertical, Download, Smartphone, Phone, Cake, Filter, CheckCircle2, XCircle } from 'lucide-react';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { supabase } from '@/lib/supabase';
@@ -84,6 +84,10 @@ export default function ColaboradoresPage() {
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
   const [activeCropMode, setActiveCropMode] = useState<'create' | 'edit' | null>(null);
+
+  // Import result dialog states
+  const [isImportResultDialogOpen, setIsImportResultDialogOpen] = useState(false);
+  const [importResult, setImportResult] = useState<{ success: boolean; title: string; message: string } | null>(null);
 
   useEffect(() => {
     loadColaboradores();
@@ -352,23 +356,47 @@ export default function ColaboradoresPage() {
           return obj;
         }).filter((row: any) => row.matricula && row.nome); // Campos obrigatórios
 
-        if (formattedData.length === 0) {
-          toast.error('Nenhum dado válido encontrado.');
+        // Alguns exports trazem mais de uma linha para a mesma matrícula (ex: múltiplos
+        // registros de locomoção/veículo). Deduplica mantendo a última ocorrência para
+        // evitar erro do Postgres "ON CONFLICT DO UPDATE cannot affect row a second time".
+        const dedupedMap = new Map<string, any>();
+        formattedData.forEach((row: any) => dedupedMap.set(row.matricula, row));
+        const uniqueFormattedData = Array.from(dedupedMap.values());
+        const duplicatesRemoved = formattedData.length - uniqueFormattedData.length;
+
+        if (uniqueFormattedData.length === 0) {
+          setImportResult({
+            success: false,
+            title: 'Nenhum dado válido encontrado',
+            message: 'Não foi encontrado nenhum registro com Matrícula e Nome preenchidos na planilha enviada.'
+          });
+          setIsImportResultDialogOpen(true);
           return;
         }
 
         // Realiza o upsert (insert ou update) com base na matricula
         const { error } = await supabase
           .from('colaboradores')
-          .upsert(formattedData, { onConflict: 'matricula', ignoreDuplicates: false });
+          .upsert(uniqueFormattedData, { onConflict: 'matricula', ignoreDuplicates: false });
 
         if (error) throw error;
-        
-        toast.success(`${formattedData.length} colaboradores processados.`);
+
+        setImportResult({
+          success: true,
+          title: 'Importação concluída',
+          message: `${uniqueFormattedData.length} colaborador(es) processado(s) com sucesso.` +
+            (duplicatesRemoved > 0 ? ` ${duplicatesRemoved} linha(s) duplicada(s) na planilha (mesma matrícula) foram unificadas automaticamente.` : '')
+        });
+        setIsImportResultDialogOpen(true);
         loadColaboradores();
       } catch (error: any) {
         console.error(error);
-        toast.error('Erro ao processar arquivo: ' + error.message);
+        setImportResult({
+          success: false,
+          title: 'Erro ao importar planilha',
+          message: error.message || 'Ocorreu um erro inesperado ao processar o arquivo.'
+        });
+        setIsImportResultDialogOpen(true);
       }
     };
     reader.readAsBinaryString(file);
@@ -1011,6 +1039,38 @@ export default function ColaboradoresPage() {
             </Button>
             <Button variant="destructive" onClick={confirmBulkDelete} disabled={isBulkDeleting}>
               {isBulkDeleting ? 'Excluindo...' : `Sim, Excluir ${selectedIds.size}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isImportResultDialogOpen} onOpenChange={setIsImportResultDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="flex justify-center pt-2">
+              {importResult?.success ? (
+                <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+              ) : (
+                <XCircle className="w-12 h-12 text-red-500" />
+              )}
+            </div>
+            <DialogTitle className="text-center text-base">
+              {importResult?.title}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-sm text-zinc-600 text-center">
+              {importResult?.message}
+            </p>
+          </div>
+          <div className="flex justify-center pt-2">
+            <Button
+              type="button"
+              className={importResult?.success ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+              variant={importResult?.success ? 'default' : 'outline'}
+              onClick={() => setIsImportResultDialogOpen(false)}
+            >
+              Entendi
             </Button>
           </div>
         </DialogContent>
