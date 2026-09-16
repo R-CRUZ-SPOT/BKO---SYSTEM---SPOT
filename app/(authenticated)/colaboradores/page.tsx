@@ -374,18 +374,74 @@ export default function ColaboradoresPage() {
           return;
         }
 
-        // Realiza o upsert (insert ou update) com base na matricula
-        const { error } = await supabase
+        // Busca os colaboradores já cadastrados para detectar troca de matrícula da mesma
+        // pessoa (ex: temporário -> efetivo). Quando a planilha traz uma matrícula nova que
+        // não existe no sistema mas o CPF/e-mail já pertence a um colaborador cadastrado,
+        // atualiza o registro existente em vez de criar um duplicado, preservando os vínculos
+        // de aparelhos/linhas já associados a ele.
+        const { data: existingColaboradores, error: fetchError } = await supabase
           .from('colaboradores')
-          .upsert(uniqueFormattedData, { onConflict: 'matricula', ignoreDuplicates: false });
+          .select('id, matricula, cpf, email');
 
-        if (error) throw error;
+        if (fetchError) throw fetchError;
+
+        const normalizeCpf = (v: any) => v ? v.toString().replace(/\D/g, '') || null : null;
+        const normalizeEmail = (v: any) => v ? v.toString().trim().toLowerCase() : null;
+
+        const existingMatriculas = new Set((existingColaboradores || []).map((c: any) => c.matricula));
+        const byCpf = new Map<string, any>();
+        const byEmail = new Map<string, any>();
+        (existingColaboradores || []).forEach((c: any) => {
+          const cpfKey = normalizeCpf(c.cpf);
+          if (cpfKey && !byCpf.has(cpfKey)) byCpf.set(cpfKey, c);
+          const emailKey = normalizeEmail(c.email);
+          if (emailKey && !byEmail.has(emailKey)) byEmail.set(emailKey, c);
+        });
+
+        const rowsToUpsert: any[] = [];
+        const rowsToReassign: { id: string; data: any }[] = [];
+
+        uniqueFormattedData.forEach((row: any) => {
+          if (existingMatriculas.has(row.matricula)) {
+            rowsToUpsert.push(row);
+            return;
+          }
+
+          const cpfKey = normalizeCpf(row.cpf);
+          const emailKey = normalizeEmail(row.email);
+          const match = (cpfKey && byCpf.get(cpfKey)) || (emailKey && byEmail.get(emailKey));
+
+          if (match && match.matricula !== row.matricula) {
+            rowsToReassign.push({ id: match.id, data: row });
+          } else {
+            rowsToUpsert.push(row);
+          }
+        });
+
+        // Realiza o upsert (insert ou update) com base na matricula para os registros normais
+        if (rowsToUpsert.length > 0) {
+          const { error } = await supabase
+            .from('colaboradores')
+            .upsert(rowsToUpsert, { onConflict: 'matricula', ignoreDuplicates: false });
+
+          if (error) throw error;
+        }
+
+        // Atualiza pelo id os colaboradores que trocaram de matrícula, mantendo os vínculos
+        let reassignErrors = 0;
+        for (const { id, data } of rowsToReassign) {
+          const { error } = await supabase.from('colaboradores').update(data).eq('id', id);
+          if (error) reassignErrors++;
+        }
+        const reassignedCount = rowsToReassign.length - reassignErrors;
 
         setImportResult({
-          success: true,
-          title: 'Importação concluída',
+          success: reassignErrors === 0,
+          title: reassignErrors === 0 ? 'Importação concluída' : 'Importação concluída com avisos',
           message: `${uniqueFormattedData.length} colaborador(es) processado(s) com sucesso.` +
-            (duplicatesRemoved > 0 ? ` ${duplicatesRemoved} linha(s) duplicada(s) na planilha (mesma matrícula) foram unificadas automaticamente.` : '')
+            (duplicatesRemoved > 0 ? ` ${duplicatesRemoved} linha(s) duplicada(s) na planilha (mesma matrícula) foram unificadas automaticamente.` : '') +
+            (reassignedCount > 0 ? ` ${reassignedCount} colaborador(es) tiveram a matrícula atualizada (ex: troca de temporário para efetivo), mantendo os vínculos de aparelhos/linhas já existentes.` : '') +
+            (reassignErrors > 0 ? ` ${reassignErrors} atualização(ões) de matrícula falharam.` : '')
         });
         setIsImportResultDialogOpen(true);
         loadColaboradores();
