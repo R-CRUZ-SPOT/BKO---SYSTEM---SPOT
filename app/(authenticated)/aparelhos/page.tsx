@@ -114,7 +114,8 @@ export default function AparelhosPage() {
     if (search) {
       const lowerSearch = search.toLowerCase();
       result = result.filter(item => {
-        const statusStr = item.colaborador_id ? 'em uso' : 'disponível';
+        const desligado = item.colaboradores?.status === 'inativo';
+        const statusStr = item.colaborador_id ? (desligado ? 'em uso com promotor desligado' : 'em uso') : 'disponível';
         const searchStr = `${item.imei || ''} ${item.modelo || ''} ${statusStr} ${item.colaboradores?.nome || ''} ${item.colaboradores?.matricula || ''}`.toLowerCase();
         return searchStr.includes(lowerSearch);
       });
@@ -768,7 +769,7 @@ export default function AparelhosPage() {
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
             <Input
-              placeholder="Pesquisar por IMEI, modelo ou colaborador..."
+              placeholder="Pesquisar por IMEI, modelo, colaborador ou 'desligado'..."
               className="pl-10 h-10 bg-zinc-50/50 border-zinc-200 rounded-xl focus:bg-white transition-all"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
