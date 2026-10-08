@@ -87,7 +87,7 @@ export default function ColaboradoresPage() {
 
   // Import result dialog states
   const [isImportResultDialogOpen, setIsImportResultDialogOpen] = useState(false);
-  const [importResult, setImportResult] = useState<{ success: boolean; title: string; message: string } | null>(null);
+  const [importResult, setImportResult] = useState<{ success: boolean; title: string; message: string; details?: string[] } | null>(null);
 
   useEffect(() => {
     loadColaboradores();
@@ -308,10 +308,23 @@ export default function ColaboradoresPage() {
         };
 
         // Helper para mapear valores de colunas de forma mais flexível (case insensitive e múltiplas opções)
+        // Exports em "xls" que na verdade são HTML trazem entidades (ex: F&#233;rias, &amp;)
+        const decodeHtmlEntities = (s: string) =>
+          s
+            .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+            .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&quot;/gi, '"')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&amp;/gi, '&');
+
         const getColValue = (row: any, possibleNames: string[]) => {
           for (const key of Object.keys(row)) {
             if (possibleNames.includes(key.trim().toUpperCase())) {
-              return row[key] === '' ? null : row[key];
+              const val = row[key];
+              if (val === '') return null;
+              return typeof val === 'string' ? decodeHtmlEntities(val) : val;
             }
           }
           return null;
@@ -336,13 +349,28 @@ export default function ColaboradoresPage() {
         const hasCtps = hasField(['CTPS', 'NUM CTPS', 'NUMERO CTPS', 'NÚMERO CTPS', 'NUM. CTPS']);
         const hasSerieCtps = hasField(['SERIE CTPS', 'SÉRIE CTPS', 'SERIE_CTPS', 'SERIE', 'SÉRIE']);
 
+        // Demitido = situação contendo DEMIT/DESLIG; a data de rescisão só vale quando a situação
+        // vem vazia. "Suspensão Rescisão Indireta" e afastamentos NÃO são considerados demitidos.
+        const normalizeText = (v: any) =>
+          (v ?? '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
+        const isDemitidoRow = (row: any) => {
+          const situacao = normalizeText(getColValue(row, ['SITUACAO', 'SITUAÇÃO']));
+          const rescisao = getColValue(row, ['DATA RESCISAO', 'DATA RESCISÃO', 'DATA_RESCISAO']);
+          if (!situacao) return !!rescisao;
+          return situacao.includes('DEMIT') || situacao.includes('DESLIG');
+        };
+
         // Validar e formatar dados (apenas injeta a coluna no objeto se a planilha tem a coluna correspondente)
         const formattedData = data.map((row: any) => {
           const obj: any = {};
-          
+
           obj.matricula = getColValue(row, ['MATRICULA', 'MATRÍCULA'])?.toString();
           obj.nome = getColValue(row, ['NOME', 'COLABORADOR']);
-          
+
+          // Metadados apenas para a importação (removidos antes de enviar ao banco)
+          obj._demitido = isDemitidoRow(row);
+          obj._dataRescisao = parseImportDate(getColValue(row, ['DATA RESCISAO', 'DATA RESCISÃO', 'DATA_RESCISAO']));
+
           if (hasEmail) obj.email = getColValue(row, ['EMAIL', 'E-MAIL']) || null;
           if (hasAdmissao) obj.data_admissao = parseImportDate(getColValue(row, ['ADMISSAO', 'ADMISSÃO', 'DATA_ADMISSAO', 'DATA ADMISSAO', 'DATA DE ADMISSAO', 'DATA DE ADMISSÃO']));
           if (hasJob) obj.job = getColValue(row, ['JOB']) || null;
@@ -381,29 +409,36 @@ export default function ColaboradoresPage() {
         // de aparelhos/linhas já associados a ele.
         const { data: existingColaboradores, error: fetchError } = await supabase
           .from('colaboradores')
-          .select('id, matricula, cpf, email');
+          .select('id, matricula, cpf, email, status');
 
         if (fetchError) throw fetchError;
 
         const normalizeCpf = (v: any) => v ? v.toString().replace(/\D/g, '') || null : null;
         const normalizeEmail = (v: any) => v ? v.toString().trim().toLowerCase() : null;
 
-        const existingMatriculas = new Set((existingColaboradores || []).map((c: any) => c.matricula));
+        const byMatricula = new Map<string, any>();
         const byCpf = new Map<string, any>();
         const byEmail = new Map<string, any>();
         (existingColaboradores || []).forEach((c: any) => {
+          byMatricula.set(c.matricula, c);
           const cpfKey = normalizeCpf(c.cpf);
           if (cpfKey && !byCpf.has(cpfKey)) byCpf.set(cpfKey, c);
           const emailKey = normalizeEmail(c.email);
           if (emailKey && !byEmail.has(emailKey)) byEmail.set(emailKey, c);
         });
 
+        // Demitidos nunca são cadastrados: só os demais seguem para upsert/reatribuição
+        const stripMeta = ({ _demitido, _dataRescisao, ...clean }: any) => clean;
+        const activeRows = uniqueFormattedData.filter((row: any) => !row._demitido);
+        const demitidoRows = uniqueFormattedData.filter((row: any) => row._demitido);
+
         const rowsToUpsert: any[] = [];
         const rowsToReassign: { id: string; data: any }[] = [];
 
-        uniqueFormattedData.forEach((row: any) => {
-          if (existingMatriculas.has(row.matricula)) {
-            rowsToUpsert.push(row);
+        activeRows.forEach((row: any) => {
+          const clean = stripMeta(row);
+          if (byMatricula.has(row.matricula)) {
+            rowsToUpsert.push(clean);
             return;
           }
 
@@ -412,9 +447,9 @@ export default function ColaboradoresPage() {
           const match = (cpfKey && byCpf.get(cpfKey)) || (emailKey && byEmail.get(emailKey));
 
           if (match && match.matricula !== row.matricula) {
-            rowsToReassign.push({ id: match.id, data: row });
+            rowsToReassign.push({ id: match.id, data: clean });
           } else {
-            rowsToUpsert.push(row);
+            rowsToUpsert.push(clean);
           }
         });
 
@@ -435,15 +470,83 @@ export default function ColaboradoresPage() {
         }
         const reassignedCount = rowsToReassign.length - reassignErrors;
 
+        // Demitidos que já estão cadastrados como ativos: inativa o colaborador, mantendo
+        // os vínculos de aparelhos/linhas (as telas de ativos sinalizam "promotor desligado").
+        // Quem não está cadastrado (ou já está inativo) é simplesmente ignorado.
+        const activeMatriculas = new Set(activeRows.map((r: any) => r.matricula));
+        const activeCpfs = new Set(activeRows.map((r: any) => normalizeCpf(r.cpf)).filter(Boolean));
+        const reassignIds = new Set(rowsToReassign.map(r => r.id));
+        const toInactivate = new Map<string, { id: string; nome: string; matricula: string; dataRescisao: string | null }>();
+        let demitidosIgnorados = 0;
+
+        demitidoRows.forEach((row: any) => {
+          const cpfKey = normalizeCpf(row.cpf);
+          const emailKey = normalizeEmail(row.email);
+          const existing = byMatricula.get(row.matricula) || (cpfKey && byCpf.get(cpfKey)) || (emailKey && byEmail.get(emailKey));
+
+          // Ignora se não existe, se já está inativo ou se a mesma pessoa aparece ativa na planilha
+          // com outra matrícula (ex: temporário demitido + efetivo ativo, ou contratos antigos
+          // demitidos de quem hoje trabalha)
+          if (
+            !existing ||
+            existing.status === 'inativo' ||
+            activeMatriculas.has(existing.matricula) ||
+            reassignIds.has(existing.id) ||
+            (cpfKey && activeCpfs.has(cpfKey)) ||
+            (normalizeCpf(existing.cpf) && activeCpfs.has(normalizeCpf(existing.cpf)))
+          ) {
+            demitidosIgnorados++;
+            return;
+          }
+          toInactivate.set(existing.id, { id: existing.id, nome: row.nome, matricula: existing.matricula, dataRescisao: row._dataRescisao });
+        });
+
+        let inactivateErrors = 0;
+        const inactivated: { id: string; nome: string; matricula: string }[] = [];
+        for (const item of toInactivate.values()) {
+          const { error } = await supabase
+            .from('colaboradores')
+            .update({ status: 'inativo', data_inativacao: item.dataRescisao ? `${item.dataRescisao}T00:00:00` : new Date().toISOString() })
+            .eq('id', item.id);
+          if (error) inactivateErrors++;
+          else inactivated.push(item);
+        }
+
+        // Quantos ativos continuam vinculados a cada promotor inativado (para o resumo)
+        const details: string[] = [];
+        if (inactivated.length > 0) {
+          const ids = inactivated.map(i => i.id);
+          const [{ data: aps }, { data: lns }] = await Promise.all([
+            supabase.from('aparelhos').select('colaborador_id').in('colaborador_id', ids),
+            supabase.from('linhas').select('colaborador_id').in('colaborador_id', ids),
+          ]);
+          inactivated.forEach(i => {
+            const nAp = (aps || []).filter((a: any) => a.colaborador_id === i.id).length;
+            const nLn = (lns || []).filter((l: any) => l.colaborador_id === i.id).length;
+            const partes = [nAp > 0 ? `${nAp} aparelho(s)` : '', nLn > 0 ? `${nLn} linha(s)` : ''].filter(Boolean);
+            details.push(`${i.nome} (matrícula ${i.matricula})` + (partes.length ? ` — ainda vinculado a ${partes.join(' e ')}` : ' — sem ativos vinculados'));
+          });
+        }
+
+        const hasWarnings = reassignErrors > 0 || inactivateErrors > 0;
         setImportResult({
-          success: reassignErrors === 0,
-          title: reassignErrors === 0 ? 'Importação concluída' : 'Importação concluída com avisos',
-          message: `${uniqueFormattedData.length} colaborador(es) processado(s) com sucesso.` +
+          success: !hasWarnings,
+          title: hasWarnings ? 'Importação concluída com avisos' : 'Importação concluída',
+          message: `${activeRows.length} colaborador(es) processado(s) com sucesso.` +
             (duplicatesRemoved > 0 ? ` ${duplicatesRemoved} linha(s) duplicada(s) na planilha (mesma matrícula) foram unificadas automaticamente.` : '') +
             (reassignedCount > 0 ? ` ${reassignedCount} colaborador(es) tiveram a matrícula atualizada (ex: troca de temporário para efetivo), mantendo os vínculos de aparelhos/linhas já existentes.` : '') +
-            (reassignErrors > 0 ? ` ${reassignErrors} atualização(ões) de matrícula falharam.` : '')
+            (reassignErrors > 0 ? ` ${reassignErrors} atualização(ões) de matrícula falharam.` : '') +
+            (demitidoRows.length > 0
+              ? ` ${demitidoRows.length} promotor(es) demitido(s) na planilha: ${inactivated.length} inativado(s) no sistema (vínculos mantidos) e ${demitidosIgnorados} ignorado(s) (não cadastrados ou já inativos).`
+              : '') +
+            (inactivateErrors > 0 ? ` ${inactivateErrors} inativação(ões) falharam.` : ''),
+          details: details.length > 0 ? details : undefined
         });
         setIsImportResultDialogOpen(true);
+        dataCache.invalidate('colaboradores');
+        dataCache.invalidate('aparelhos');
+        dataCache.invalidate('linhas');
+        dataCache.invalidate('dashboard_stats');
         loadColaboradores();
       } catch (error: any) {
         console.error(error);
@@ -1101,7 +1204,7 @@ export default function ColaboradoresPage() {
       </Dialog>
 
       <Dialog open={isImportResultDialogOpen} onOpenChange={setIsImportResultDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <div className="flex justify-center pt-2">
               {importResult?.success ? (
@@ -1118,6 +1221,16 @@ export default function ColaboradoresPage() {
             <p className="text-sm text-zinc-600 text-center">
               {importResult?.message}
             </p>
+            {importResult?.details && importResult.details.length > 0 && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p className="text-xs font-bold text-amber-800 mb-2">Promotores inativados (vínculos mantidos):</p>
+                <ul className="max-h-40 overflow-y-auto space-y-1 text-xs text-amber-900 list-disc pl-4">
+                  {importResult.details.map((d, i) => (
+                    <li key={i}>{d}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
           <div className="flex justify-center pt-2">
             <Button

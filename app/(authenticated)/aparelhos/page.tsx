@@ -24,6 +24,13 @@ export default function AparelhosPage() {
   const [selectedAparelho, setSelectedAparelho] = useState<any>(null);
   const [searchColabDialog, setSearchColabDialog] = useState('');
 
+  // Desvincular / transferir para outro promotor
+  const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
+  const [unlinkTarget, setUnlinkTarget] = useState<any>(null);
+  const [unlinkSearch, setUnlinkSearch] = useState('');
+  const [transferToId, setTransferToId] = useState<string | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
+
   // Dialog states for Create
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newImei, setNewImei] = useState('');
@@ -87,7 +94,7 @@ export default function AparelhosPage() {
       const { data, error } = await supabase.from('aparelhos').select(`
         *,
         colaboradores (
-          id, nome, matricula
+          id, nome, matricula, status
         )
       `);
       
@@ -383,6 +390,53 @@ export default function AparelhosPage() {
     }
   };
 
+  const openUnlinkDialog = (aparelho: any) => {
+    setUnlinkTarget(aparelho);
+    setUnlinkSearch('');
+    setTransferToId(null);
+    setUnlinkDialogOpen(true);
+  };
+
+  const transferirAparelho = async () => {
+    if (!unlinkTarget?.colaborador_id || !transferToId || transferToId === unlinkTarget.colaborador_id) return;
+    setIsTransferring(true);
+    try {
+      const agora = new Date().toISOString();
+
+      const { error } = await supabase
+        .from('aparelhos')
+        .update({ colaborador_id: transferToId })
+        .eq('id', unlinkTarget.id);
+
+      if (error) throw error;
+
+      // Encerra o histórico do promotor anterior e abre o do novo
+      await supabase.from('vinculos')
+        .update({ data_fim: agora })
+        .eq('aparelho_id', unlinkTarget.id)
+        .eq('colaborador_id', unlinkTarget.colaborador_id)
+        .is('data_fim', null);
+
+      await supabase.from('vinculos').insert({
+        colaborador_id: transferToId,
+        aparelho_id: unlinkTarget.id,
+        data_inicio: agora
+      });
+
+      const novo = colaboradoresAtivos.find(c => c.id === transferToId);
+      toast.success(`Aparelho transferido para ${novo?.nome ?? 'o novo promotor'}!`);
+      setUnlinkDialogOpen(false);
+      setUnlinkTarget(null);
+      dataCache.invalidate('aparelhos');
+      dataCache.invalidate('colaboradores');
+      loadAparelhos();
+    } catch (error: any) {
+      toast.error('Erro ao transferir: ' + error.message);
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
   const openLinkDialog = (aparelho: any) => {
     setSelectedAparelho(aparelho);
     setSearchColabDialog('');
@@ -547,6 +601,13 @@ export default function AparelhosPage() {
     c.nome.toLowerCase().includes(searchColabDialog.toLowerCase()) || 
     c.matricula.toLowerCase().includes(searchColabDialog.toLowerCase())
   ).slice(0, 5); // Limitar sugestões na tela
+
+  const colabsTransferencia = colaboradoresAtivos.filter(c =>
+    c.id !== unlinkTarget?.colaborador_id &&
+    (c.nome.toLowerCase().includes(unlinkSearch.toLowerCase()) ||
+      c.matricula.toLowerCase().includes(unlinkSearch.toLowerCase()))
+  ).slice(0, 5);
+  const transferToColab = colaboradoresAtivos.find(c => c.id === transferToId);
 
   return (
     <div className="space-y-6">
@@ -813,18 +874,28 @@ export default function AparelhosPage() {
                         <span className="font-bold text-zinc-900 text-sm">{aparelho.modelo}</span>
                       </TableCell>
                       <TableCell className="px-6 py-4">
+                        {aparelho.colaboradores?.status === 'inativo' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                            <span className="w-1 h-1 rounded-full mr-1.5 bg-rose-500" />
+                            COM PROMOTOR DESLIGADO
+                          </span>
+                        ) : (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${
                           !aparelho.colaborador_id ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
                         }`}>
                           <span className={`w-1 h-1 rounded-full mr-1.5 ${!aparelho.colaborador_id ? 'bg-emerald-500' : 'bg-blue-500'}`} />
                           {!aparelho.colaborador_id ? 'DISPONÍVEL' : 'EM USO'}
                         </span>
+                        )}
                       </TableCell>
                       <TableCell className="px-6 py-4">
                         {aparelho.colaboradores ? (
                           <div className="flex flex-col">
                             <span className="text-sm font-semibold text-zinc-700">{aparelho.colaboradores.nome}</span>
                             <span className="text-[10px] text-zinc-400">MATRÍCULA: {aparelho.colaboradores.matricula}</span>
+                            {aparelho.colaboradores.status === 'inativo' && (
+                              <span className="text-[10px] font-bold text-rose-600">PROMOTOR DESLIGADO — recolher ativo</span>
+                            )}
                           </div>
                         ) : (
                           <span className="text-xs text-zinc-400 italic">Nenhum</span>
@@ -847,8 +918,8 @@ export default function AparelhosPage() {
                                  Vincular Colaborador
                                </DropdownMenuItem>
                              ) : (
-                               <DropdownMenuItem className="text-rose-600 cursor-pointer" onClick={() => desvincularAparelho(aparelho)}>
-                                 Desvincular Ativo
+                               <DropdownMenuItem className="text-rose-600 cursor-pointer" onClick={() => openUnlinkDialog(aparelho)}>
+                                 Desvincular / Transferir
                                </DropdownMenuItem>
                              )}
                              <div className="h-px bg-zinc-100 my-1" />
@@ -901,6 +972,77 @@ export default function AparelhosPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={unlinkDialogOpen} onOpenChange={setUnlinkDialogOpen}>
+        <DialogContent className="rounded-2xl border-none shadow-2xl p-0 overflow-hidden">
+          <DialogHeader className="p-6 bg-zinc-900 text-white">
+            <DialogTitle className="text-xl">Desvincular Ativo</DialogTitle>
+            <p className="text-xs text-zinc-400 mt-1">
+              {unlinkTarget?.modelo} (IMEI {unlinkTarget?.imei}) está com {unlinkTarget?.colaboradores?.nome}
+              {unlinkTarget?.colaboradores?.status === 'inativo' ? ' (promotor desligado)' : ''}
+            </p>
+          </DialogHeader>
+          <div className="p-6 space-y-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full rounded-xl border-zinc-200 h-10"
+              disabled={isTransferring}
+              onClick={() => {
+                const alvo = unlinkTarget;
+                setUnlinkDialogOpen(false);
+                desvincularAparelho(alvo);
+              }}
+            >
+              Apenas desvincular (deixar disponível)
+            </Button>
+
+            <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+              <div className="h-px flex-1 bg-zinc-100" />
+              ou transferir para outro promotor
+              <div className="h-px flex-1 bg-zinc-100" />
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+              <Input
+                placeholder="Pesquisar por nome ou matrícula..."
+                className="pl-10 h-10 bg-zinc-50 border-zinc-200 rounded-xl"
+                value={unlinkSearch}
+                onChange={(e) => setUnlinkSearch(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+              {colabsTransferencia.map((c) => (
+                <div
+                  key={c.id}
+                  className={`flex items-center justify-between p-3 border rounded-xl transition-all cursor-pointer ${
+                    transferToId === c.id ? 'bg-emerald-50 border-emerald-300' : 'border-zinc-100 hover:bg-zinc-50'
+                  }`}
+                  onClick={() => setTransferToId(c.id)}
+                >
+                  <div>
+                    <p className="font-bold text-sm text-zinc-900">{c.nome}</p>
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Matrícula: {c.matricula}</p>
+                  </div>
+                  {transferToId === c.id && <span className="text-[10px] font-bold text-emerald-700">SELECIONADO</span>}
+                </div>
+              ))}
+              {colabsTransferencia.length === 0 && (
+                <p className="text-xs text-center text-zinc-500 py-6">Nenhum colaborador ativo encontrado.</p>
+              )}
+            </div>
+            <Button
+              type="button"
+              className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 h-10"
+              disabled={!transferToId || isTransferring}
+              onClick={transferirAparelho}
+            >
+              {isTransferring ? 'Transferindo...' : transferToColab ? `Transferir para ${transferToColab.nome}` : 'Selecione um promotor para transferir'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent className="rounded-2xl border-none shadow-2xl p-0 overflow-hidden">
