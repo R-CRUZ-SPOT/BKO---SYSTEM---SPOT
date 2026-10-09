@@ -36,6 +36,132 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 }
 
+type TipoTermo = 'recebimento' | 'devolucao' | 'recebimento_uniforme' | 'devolucao_uniforme';
+
+const TIPO_TERMO_LABELS: Record<TipoTermo, string> = {
+  recebimento: 'Termo de Recebimento',
+  devolucao: 'Termo de Devolução',
+  recebimento_uniforme: 'Termo de Recebimento de Uniforme',
+  devolucao_uniforme: 'Termo de Devolução de Uniforme',
+};
+
+const isUniforme = (tipo: TipoTermo): tipo is 'recebimento_uniforme' | 'devolucao_uniforme' =>
+  tipo === 'recebimento_uniforme' || tipo === 'devolucao_uniforme';
+
+const ITENS_UNIFORME = [
+  { descricao: 'CAMISETAS MANGA CURTA', valor: 'R$ 60,00 CADA' },
+  { descricao: 'CAMISETAS MANGA LONGA', valor: 'R$ 60,00 CADA' },
+  { descricao: 'CALÇAS', valor: 'R$ 60,00 CADA' },
+  { descricao: 'JAQUETAS', valor: 'R$ 100,00 CADA' },
+  { descricao: 'MOLETOM S/ CAPUZ', valor: 'R$ 120,00 CADA' },
+];
+
+// Bordas inline: o html2canvas da geração em massa não captura de forma confiável as classes de borda do Tailwind.
+const BORDA = '1px solid #000';
+
+function UniformeDocument({
+  tipoTermo,
+  colaborador,
+  today,
+}: {
+  tipoTermo: 'recebimento_uniforme' | 'devolucao_uniforme';
+  colaborador: Colaborador | undefined;
+  today: string;
+}) {
+  const recebimento = tipoTermo === 'recebimento_uniforme';
+  return (
+    <div style={{ maxWidth: '210mm', boxSizing: 'border-box' }} className="bg-white p-10 max-w-[210mm] w-full shadow-xl print:shadow-none print:p-0 print:text-sm font-sans text-black text-sm relative">
+      <div className="flex justify-end mb-8 print:mb-5">
+        <img src="/logo-spot.png" alt="SPOT" className="h-16 print:h-12 w-auto" />
+      </div>
+
+      <div className="text-center font-bold mb-10 print:mb-5 text-base uppercase">
+        {recebimento ? 'TERMO DE RESPONSABILIDADE E RECEBIMENTO DE UNIFORME' : 'TERMO DEVOLUÇÃO DE UNIFORME'}
+      </div>
+
+      <div className="text-justify mb-4 print:mb-3 leading-relaxed print:leading-snug">
+        {recebimento ? (
+          <p>
+            Pelo presente, eu <strong>{colaborador?.nome || '___________________________'}</strong>,
+            portador(a) do CPF: <strong>{colaborador?.cpf || '_________________'}</strong>, funcionário contratado
+            pela empresa SPOT PROMOÇÕES EVENTOS E MERCHANDISING LTDA, para atuação em pontos de venda de produtos
+            distribuídos pela EPSON DO BRASIL, declaro estar recebendo o kit de uniformes.
+          </p>
+        ) : (
+          <p>
+            Pelo presente, eu <strong>{colaborador?.nome || '___________________________'}</strong>,
+            portador(a) do CPF: <strong>{colaborador?.cpf || '_________________'}</strong>, declaro ter devolvido
+            para a empresa SPOT PROMOÇÕES EVENTOS E MERCHANDISING LTDA o equipamento/material abaixo relacionado
+            e, com o presente termo, ciente da responsabilidade inerente à utilização do referido.
+          </p>
+        )}
+      </div>
+
+      {recebimento ? (
+        <>
+          <p className="text-justify mb-4 print:mb-3 leading-relaxed print:leading-snug">
+            Por se tratar de uma ferramenta de trabalho, comprometo-me em devolvê-lo no término de meu contrato de
+            trabalho ou quando solicitado.
+          </p>
+          <p className="text-justify mb-8 print:mb-4 leading-relaxed print:leading-snug">
+            Caso essa devolução não ocorra, autorizo o desconto de acordo com valor abaixo dos vencimentos relativos
+            às minhas verbas rescisórias.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-justify mb-4 print:mb-3 leading-relaxed print:leading-snug">
+            Caso a devolução não ocorra, tenho ciência e autorizo que a empresa efetue o desconto dos meus
+            vencimentos ou relativo às minhas verbas rescisórias.
+          </p>
+          <p className="text-justify mb-8 print:mb-4 leading-relaxed print:leading-snug">
+            Declaro estar ciente também de que o equipamento/material não possui nenhum tipo de cobertura (seguro)
+            bem como nunca deverá ser fornecido ou emprestado para terceiros, ficando ciente que é motivo para
+            rescisão justificada à entrega para terceiros utilizar.
+          </p>
+        </>
+      )}
+
+      <table style={{ border: BORDA, borderCollapse: 'collapse' }} className="w-full mb-8 print:mb-4 text-center text-sm">
+        <thead>
+          <tr style={{ border: BORDA, backgroundColor: '#fafafa' }} className="font-bold">
+            <th style={{ border: BORDA }} className="p-2 w-16">QTD</th>
+            <th style={{ border: BORDA }} className="p-2">DESCRIÇÃO</th>
+            <th style={{ border: BORDA }} className="p-2">VALOR</th>
+            <th style={{ border: BORDA }} className="p-2 w-36">ASSINATURA</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ITENS_UNIFORME.map(item => (
+            <tr key={item.descricao} style={{ border: BORDA }} className="h-8">
+              <td style={{ border: BORDA }} className="p-2">( )</td>
+              <td style={{ border: BORDA }} className="p-2">{item.descricao}</td>
+              <td style={{ border: BORDA }} className="p-2">{item.valor}</td>
+              <td style={{ border: BORDA }} className="p-2"></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Espaçamentos inline: a geração em massa não aplica o space-y do Tailwind de forma confiável. */}
+      <div className="mt-12 print:mt-10">
+        <p>{today}.</p>
+
+        <div className="w-80" style={{ marginTop: '4.5rem' }}>
+          <div style={{ borderBottom: BORDA }}></div>
+          <p className="font-bold" style={{ marginTop: '0.5rem', fontWeight: 700 }}>{colaborador?.nome || '______________________________________'}</p>
+          <p className="text-xs" style={{ marginTop: '0.25rem' }}>ASSINATURA</p>
+        </div>
+      </div>
+
+      <div className="text-center text-xs mt-24 print:mt-10">
+        <p>SPOTPROMO - Rua Joaquim Floriano, 100 6o. Andar - Itaim Bibi - São Paulo – SP</p>
+        <p>www.spotpromo.com.br</p>
+      </div>
+    </div>
+  );
+}
+
 function TermoDocument({
   tipoTermo,
   colaborador,
@@ -43,12 +169,15 @@ function TermoDocument({
   totalValue,
   today,
 }: {
-  tipoTermo: 'recebimento' | 'devolucao';
+  tipoTermo: TipoTermo;
   colaborador: Colaborador | undefined;
   produtos: Produto[];
   totalValue: number;
   today: string;
 }) {
+  if (isUniforme(tipoTermo)) {
+    return <UniformeDocument tipoTermo={tipoTermo} colaborador={colaborador} today={today} />;
+  }
   return (
     <div className="bg-white p-10 max-w-[210mm] w-full shadow-xl print:shadow-none print:p-0 print:text-sm font-sans text-black text-sm relative">
       <div className="flex justify-end mb-8 print:mb-5">
@@ -182,7 +311,7 @@ function TermoDocument({
 }
 
 export default function TermosPage() {
-  const [tipoTermo, setTipoTermo] = useState<'recebimento' | 'devolucao'>('recebimento');
+  const [tipoTermo, setTipoTermo] = useState<TipoTermo>('recebimento');
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [selectedColaboradorId, setSelectedColaboradorId] = useState<string>('');
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -224,6 +353,7 @@ export default function TermosPage() {
   const selectedColaborador = colaboradores.find(c => c.id === selectedColaboradorId);
 
   const totalValue = produtos.reduce((acc, curr) => acc + (curr.valor * curr.quantidade), 0);
+  const uniforme = isUniforme(tipoTermo);
 
   const [isLoadingIMEI, setIsLoadingIMEI] = useState(false);
 
@@ -334,7 +464,7 @@ export default function TermosPage() {
       toast.error('Selecione ao menos um colaborador.');
       return;
     }
-    if (produtos.length === 0) {
+    if (!uniforme && produtos.length === 0) {
       toast.error('Adicione ao menos um item ao termo antes de gerar.');
       return;
     }
@@ -422,7 +552,7 @@ export default function TermosPage() {
                 <Label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Tipo de Termo</Label>
                 <Select
                   value={tipoTermo}
-                  onValueChange={(v: "recebimento" | "devolucao" | null) => {
+                  onValueChange={(v: TipoTermo | null) => {
                     if (v) {
                       setTipoTermo(v);
                       setTermoGerado(false);
@@ -430,11 +560,13 @@ export default function TermosPage() {
                   }}
                 >
                   <SelectTrigger className="h-12 bg-zinc-50/50 border-zinc-200">
-                    <SelectValue placeholder="Selecione o tipo" />
+                    <SelectValue placeholder="Selecione o tipo">{TIPO_TERMO_LABELS[tipoTermo]}</SelectValue>
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="w-auto min-w-(--anchor-width)">
                     <SelectItem value="recebimento">Termo de Recebimento</SelectItem>
                     <SelectItem value="devolucao">Termo de Devolução</SelectItem>
+                    <SelectItem value="recebimento_uniforme">Termo de Recebimento de Uniforme</SelectItem>
+                    <SelectItem value="devolucao_uniforme">Termo de Devolução de Uniforme</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -498,6 +630,11 @@ export default function TermosPage() {
                 </div>
               )}
 
+              {uniforme ? (
+                <p className="text-xs text-zinc-500 bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3">
+                  Os itens de uniforme (camisetas, calças, jaquetas e moletom) já estão no termo. Basta selecionar o colaborador.
+                </p>
+              ) : (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Itens do Termo</Label>
@@ -552,6 +689,7 @@ export default function TermosPage() {
                   </p>
                 )}
               </div>
+              )}
 
               <div className="pt-4 border-t border-zinc-100">
                 {modo === 'individual' ? (
@@ -565,7 +703,7 @@ export default function TermosPage() {
                 ) : (
                   <Button
                     onClick={handleGerarZip}
-                    disabled={bulkSelectedIds.size === 0 || produtos.length === 0 || isGeneratingZip}
+                    disabled={bulkSelectedIds.size === 0 || (!uniforme && produtos.length === 0) || isGeneratingZip}
                     className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold h-11 rounded-xl uppercase tracking-wider text-xs gap-2"
                   >
                     <PackageCheck className="w-4 h-4" />
@@ -630,8 +768,8 @@ export default function TermosPage() {
       </div>
 
       {/* Hidden off-screen container used to capture each colaborador's PDF during batch generation */}
-      <div className="print:hidden" style={{ position: 'fixed', left: '-9999px', top: 0, zIndex: -1 }}>
-        <div ref={batchContainerRef} className="bg-white w-[210mm]">
+      <div className="print:hidden" style={{ position: 'fixed', left: '-9999px', top: 0, zIndex: -1, width: '210mm' }}>
+        <div ref={batchContainerRef} className="bg-white w-[210mm]" style={{ width: '210mm', boxSizing: 'border-box' }}>
           {batchColaborador && (
             <TermoDocument
               tipoTermo={tipoTermo}
