@@ -120,8 +120,39 @@ export interface Avulso {
   /** Lançamento à parte: NÃO entra no valor a lançar da ajuda de custo. */
   alimentacao: number;
   observacao: string | null;
+  /** O Internet vem de uma recorrência (repete todo mês): preenchido ao carregar, nunca gravado no avulso. */
+  recorrente?: boolean;
+  /** Competência (AAAA-MM) em que a recorrência do Internet começou. */
+  recorrenteDesde?: string;
   /** Dias já pagos cuja diferença de valor foi acertada via DIF - AJC (marcados ao fechar). */
   dif_dias: { id?: string; data: string; pago: number; novo: number }[];
+}
+
+/** Internet recorrente de um promotor: vale de `inicio` até `fim` (inclusive; fim nulo = sem data de término). */
+export interface RecorrenteInternet {
+  colaborador_id: string;
+  valor: number;
+  inicio: string;
+  fim: string | null;
+}
+
+/**
+ * Aplica o Internet recorrente sobre os avulsos da competência: quem tem recorrência ativa nesse mês recebe o valor
+ * recorrente (que substitui o Internet digitado no mês). Vale a recorrência de início mais recente.
+ */
+export function mesclarInternetRecorrente(avulsos: Map<string, Avulso>, regs: RecorrenteInternet[], competencia: string): Map<string, Avulso> {
+  const resultado = new Map(avulsos);
+  const ativos = new Map<string, RecorrenteInternet>();
+  for (const r of regs) {
+    if (r.inicio > competencia || (r.fim && r.fim < competencia)) continue;
+    const atual = ativos.get(r.colaborador_id);
+    if (!atual || r.inicio > atual.inicio) ativos.set(r.colaborador_id, r);
+  }
+  ativos.forEach((r, id) => {
+    const base: Avulso = avulsos.get(id) ?? { colaborador_id: id, internet: 0, dif_ajc: 0, alimentacao: 0, observacao: null, dif_dias: [] };
+    resultado.set(id, { ...base, internet: r.valor, recorrente: true, recorrenteDesde: r.inicio });
+  });
+  return resultado;
 }
 
 /** Valor a lançar = ajuda de custo calculada + Internet + DIF - AJC (nunca negativo). Alimentação fica de fora. */

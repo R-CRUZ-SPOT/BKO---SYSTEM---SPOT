@@ -5,6 +5,7 @@
 BEGIN;
 
 DELETE FROM public.ajuda_custo_lancamentos;      -- apaga em cascata itens e dias pagos
+DELETE FROM public.ajuda_custo_recorrentes;
 DELETE FROM public.ajuda_custo_complementos;
 DELETE FROM public.ajuda_custo_avulsos;
 DELETE FROM public.ajuda_custo_ocorrencias;
@@ -19,6 +20,7 @@ COMMIT;
 SELECT 'lancamentos' AS tabela, COUNT(*) FROM public.ajuda_custo_lancamentos
 UNION ALL SELECT 'itens', COUNT(*) FROM public.ajuda_custo_itens
 UNION ALL SELECT 'dias', COUNT(*) FROM public.ajuda_custo_dias
+UNION ALL SELECT 'recorrentes', COUNT(*) FROM public.ajuda_custo_recorrentes
 UNION ALL SELECT 'complementos', COUNT(*) FROM public.ajuda_custo_complementos
 UNION ALL SELECT 'avulsos', COUNT(*) FROM public.ajuda_custo_avulsos
 UNION ALL SELECT 'ocorrencias', COUNT(*) FROM public.ajuda_custo_ocorrencias

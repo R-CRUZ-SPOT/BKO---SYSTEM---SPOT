@@ -128,7 +128,7 @@ export default function CalculoPage() {
         return {
           competencia,
           colaborador_id: r.colaborador.id,
-          internet: av?.internet ?? 0,
+          internet: av?.recorrente ? 0 : av?.internet ?? 0,
           dif_ajc: r2((av?.dif_ajc ?? 0) + total),
           alimentacao: av?.alimentacao ?? 0,
           observacao: av?.observacao ?? null,

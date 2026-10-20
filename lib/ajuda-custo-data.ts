@@ -2,6 +2,8 @@ import { supabase } from '@/lib/supabase';
 import type { ItemDash, OcorrenciaDash } from '@/lib/ajuda-custo-dashboard';
 import {
   type Avulso,
+  type RecorrenteInternet,
+  mesclarInternetRecorrente,
   type DiaPago,
   type EntradaCalculo,
   type Ocorrencia,
@@ -172,9 +174,13 @@ export async function carregarEntrada(competencia: string): Promise<Carregamento
   const { data: avulsosRows, error: erroAvulsos } = await supabase.from('ajuda_custo_avulsos').select('*').eq('competencia', competencia);
   (avulsosRows ?? []).forEach((r: any) => avulsos.set(r.colaborador_id, linhaParaAvulso(r)));
 
+  // Internet recorrente (repete todo mês até ser encerrado); tolerante a tabela ainda inexistente
+  const { data: recRows } = await supabase.from('ajuda_custo_recorrentes').select('colaborador_id, valor, inicio, fim').eq('tipo', 'internet');
+  const recorrentes: RecorrenteInternet[] = (recRows ?? []).map((r: any) => ({ colaborador_id: r.colaborador_id, valor: Number(r.valor), inicio: r.inicio, fim: r.fim ?? null }));
+
   return {
     lancamento,
-    avulsos,
+    avulsos: mesclarInternetRecorrente(avulsos, recorrentes, competencia),
     avulsosIndisponiveis: !!erroAvulsos,
     ultimaCompetenciaFechada: lancamentos[0]?.competencia ?? null,
     fechadas: lancamentos.map((l: any) => l.competencia as string),
@@ -233,7 +239,7 @@ export async function fecharLancamento(
           dif_ajc: av?.dif_ajc ?? 0,
           alimentacao: av?.alimentacao ?? 0,
           detalhes: {
-            avulsos: av ? { observacao: av.observacao, dif_dias: av.dif_dias } : null,
+            avulsos: av ? { observacao: av.observacao, dif_dias: av.dif_dias, recorrente: !!av.recorrente } : null,
             por_dia_semana: r.porDiaSemana,
             dias_pagos: r.diasPagos.map((d) => ({ data: d.data, valor: d.valor })),
             dias_excluidos: r.dias.filter((d) => !d.pago).map((d) => ({ data: d.data, valor: d.valor, motivo: d.motivo })),

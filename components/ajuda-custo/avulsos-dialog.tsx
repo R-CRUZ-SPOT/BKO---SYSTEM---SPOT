@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { supabase } from '@/lib/supabase';
-import { type Avulso, DIAS_SEMANA, type DiferencaDia, diaSemana, formatarData, moeda, nomeCompetencia, r2 } from '@/lib/ajuda-custo';
+import { type Avulso, DIAS_SEMANA, type DiferencaDia, diaSemana, formatarData, moeda, nomeCompetencia, r2, somarMeses } from '@/lib/ajuda-custo';
 import { rotuloCampo } from './colab-picker';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +27,7 @@ const numero = (s: string) => Number((s || '0').replace(',', '.'));
 
 export function AvulsosDialog({ promotor, competencia, avulso, diferencas, onFechar, onSalvo }: Props) {
   const [internet, setInternet] = useState(texto(avulso?.internet));
+  const [recorrente, setRecorrente] = useState(!!avulso?.recorrente);
   const [dif, setDif] = useState(texto(avulso?.dif_ajc));
   const [alimentacao, setAlimentacao] = useState(texto(avulso?.alimentacao));
   const [observacao, setObservacao] = useState(avulso?.observacao ?? '');
@@ -49,6 +50,34 @@ export function AvulsosDialog({ promotor, competencia, avulso, diferencas, onFec
     if (difDias.length > 0 && numero(valor) !== r2(difDias.reduce((s, d) => s + (d.novo - d.pago), 0))) setDifDias([]);
   }
 
+  /**
+   * Internet recorrente (por promotor, com início e fim): marcado, vale deste mês em diante, trocando qualquer valor
+   * recorrente anterior; desmarcado, a repetição termina antes deste mês e o valor digitado vale só neste mês.
+   * Devolve a mensagem de erro, se houver.
+   */
+  async function aplicarRecorrencia(marcar: boolean, valor: number): Promise<string | null> {
+    const { data, error } = await supabase.from('ajuda_custo_recorrentes').select('id, valor, inicio, fim').eq('colaborador_id', promotor.id).eq('tipo', 'internet');
+    if (error) return error.message;
+    const regs = (data ?? []) as { id: string; valor: number; inicio: string; fim: string | null }[];
+    const futuros = regs.filter((r) => r.inicio >= competencia);
+    const abertos = regs.filter((r) => r.inicio < competencia && (!r.fim || r.fim >= competencia));
+    if (marcar && futuros.length === 0 && abertos.length === 1 && !abertos[0].fim && Number(abertos[0].valor) === valor) return null; // nada mudou
+
+    if (futuros.length > 0) {
+      const { error: e1 } = await supabase.from('ajuda_custo_recorrentes').delete().in('id', futuros.map((r) => r.id));
+      if (e1) return e1.message;
+    }
+    for (const r of abertos) {
+      const { error: e2 } = await supabase.from('ajuda_custo_recorrentes').update({ fim: somarMeses(competencia, -1) }).eq('id', r.id);
+      if (e2) return e2.message;
+    }
+    if (marcar) {
+      const { error: e3 } = await supabase.from('ajuda_custo_recorrentes').insert({ colaborador_id: promotor.id, tipo: 'internet', valor, inicio: competencia, fim: null });
+      if (e3) return e3.message;
+    }
+    return null;
+  }
+
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     const v = { internet: numero(internet), dif_ajc: numero(dif), alimentacao: numero(alimentacao) };
@@ -56,7 +85,16 @@ export function AvulsosDialog({ promotor, competencia, avulso, diferencas, onFec
     if (v.internet < 0 || v.alimentacao < 0) return toast.error('Internet e Alimentação não podem ser negativos. Use o DIF - AJC para descontos.');
 
     setSalvando(true);
-    const vazio = v.internet === 0 && v.dif_ajc === 0 && v.alimentacao === 0 && !observacao.trim();
+    if (recorrente || avulso?.recorrente) {
+      const erroRec = await aplicarRecorrencia(recorrente && v.internet > 0, v.internet);
+      if (erroRec) {
+        setSalvando(false);
+        return toast.error('Erro ao salvar a recorrência: ' + erroRec + ' (execute scripts/ajuda-de-custo-recorrentes.sql no Supabase)');
+      }
+    }
+    // com recorrência ativa o Internet vem dela; o avulso do mês não guarda o valor (evita contar duas vezes)
+    const internetNoMes = recorrente && v.internet > 0 ? 0 : v.internet;
+    const vazio = internetNoMes === 0 && v.dif_ajc === 0 && v.alimentacao === 0 && !observacao.trim();
     const { error } = vazio
       ? await supabase.from('ajuda_custo_avulsos').delete().eq('competencia', competencia).eq('colaborador_id', promotor.id)
       : await supabase.from('ajuda_custo_avulsos').upsert(
@@ -64,6 +102,7 @@ export function AvulsosDialog({ promotor, competencia, avulso, diferencas, onFec
             competencia,
             colaborador_id: promotor.id,
             ...v,
+            internet: internetNoMes,
             observacao: observacao.trim() || null,
             dif_dias: v.dif_ajc === 0 ? [] : difDias,
             updated_at: new Date().toISOString(),
@@ -91,7 +130,16 @@ export function AvulsosDialog({ promotor, competencia, avulso, diferencas, onFec
             <div className="space-y-1">
               <label className={rotuloCampo}>Internet</label>
               <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0,00" value={internet} onChange={(e) => setInternet(e.target.value)} className="h-12 rounded-xl" />
-              <p className="text-[11px] text-zinc-500">Soma ao valor a lançar.</p>
+              <label className="mt-1 flex cursor-pointer items-start gap-2 text-[11px] text-zinc-700">
+                <input type="checkbox" className="mt-0.5" checked={recorrente} onChange={(e) => setRecorrente(e.target.checked)} />
+                <span>
+                  <strong>Recorrente:</strong> repetir todo mês, a partir de {nomeCompetencia(competencia)}.
+                  {avulso?.recorrente && avulso.recorrenteDesde && <span className="text-emerald-700"> Recorrente desde {avulso.recorrenteDesde.slice(5)}/{avulso.recorrenteDesde.slice(0, 4)}.</span>}
+                </span>
+              </label>
+              <p className="text-[11px] text-zinc-500">
+                Soma ao valor a lançar. {recorrente ? 'Alterar o valor vale deste mês em diante.' : avulso?.recorrente ? 'Ao desmarcar, a repetição termina e o valor digitado vale só neste mês.' : ''}
+              </p>
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between">

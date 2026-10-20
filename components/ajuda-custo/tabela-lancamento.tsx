@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Download, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Repeat, Search, SlidersHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,6 +26,8 @@ export interface LinhaLancamento {
   /** ajuda de custo calculada (antes dos avulsos) */
   valorAjuda: number;
   internet: number;
+  /** o Internet vem de uma recorrência (repete todo mês) */
+  internetRecorrente: boolean;
   difAjc: number;
   /** lançamento à parte: não soma ao valor a lançar */
   alimentacao: number;
@@ -54,6 +56,7 @@ export function linhaDeResultado(r: ResultadoColaborador, av?: Avulso): LinhaLan
     saldoAnterior: r.saldoAnterior,
     valorAjuda: r.valorPagar,
     internet: av?.internet ?? 0,
+    internetRecorrente: !!av?.recorrente,
     difAjc: av?.dif_ajc ?? 0,
     alimentacao: av?.alimentacao ?? 0,
     observacaoAvulso: av?.observacao ?? null,
@@ -84,6 +87,7 @@ export function linhaDeItemSalvo(item: any): LinhaLancamento {
     saldoAnterior: Number(item.saldo_anterior),
     valorAjuda: Math.max(0, r2(Number(item.valor_pagar) - internet - difAjc)),
     internet,
+    internetRecorrente: !!det.avulsos?.recorrente,
     difAjc,
     alimentacao: Number(item.alimentacao ?? 0),
     observacaoAvulso: det.avulsos?.observacao ?? null,
@@ -295,7 +299,7 @@ export function TabelaLancamento({
                         {mostrarAvulsos && (
                           <>
                             <TableCell className={cn('px-2 text-right text-sm tabular-nums', extras === 0 ? 'text-zinc-300' : extras > 0 ? 'font-bold text-zinc-900' : 'font-bold text-rose-600')}>
-                              {extras === 0 ? '—' : `${extras > 0 ? '+ ' : '− '}${n2(Math.abs(extras))}`}
+                              {l.internetRecorrente && <span title="Internet recorrente (repete todo mês)"><Repeat className="mr-1 inline h-3 w-3 text-emerald-600" /></span>}{extras === 0 ? '—' : `${extras > 0 ? '+ ' : '− '}${n2(Math.abs(extras))}`}
                             </TableCell>
                             <TableCell className={cn('px-2 text-right text-sm tabular-nums', l.alimentacao > 0 ? 'font-bold text-sky-700' : 'text-zinc-300')}>
                               {l.alimentacao > 0 ? n2(l.alimentacao) : '—'}
@@ -424,7 +428,7 @@ function DetalheLinha({ linha }: { linha: LinhaLancamento }) {
             <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Lançamentos avulsos</p>
             <ul className="space-y-1">
               <li className="flex justify-between gap-4"><span>Ajuda de custo calculada</span><span className="tabular-nums font-bold">{moeda(linha.valorAjuda)}</span></li>
-              {linha.internet !== 0 && <li className="flex justify-between gap-4"><span>Internet</span><span className="tabular-nums font-bold">+ {moeda(linha.internet)}</span></li>}
+              {linha.internet !== 0 && <li className="flex justify-between gap-4"><span>Internet{linha.internetRecorrente && <span className="text-emerald-700"> (recorrente)</span>}</span><span className="tabular-nums font-bold">+ {moeda(linha.internet)}</span></li>}
               {linha.difAjc !== 0 && (
                 <li className="flex justify-between gap-4">
                   <span>DIF - AJC{linha.difDiasCount > 0 && <span className="text-zinc-500"> ({linha.difDiasCount} {linha.difDiasCount === 1 ? 'dia acertado' : 'dias acertados'})</span>}</span>
