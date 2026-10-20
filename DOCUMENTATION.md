@@ -125,3 +125,24 @@ O sistema utiliza **Row Level Security (RLS)** do Supabase para garantir que os 
 
 ---
 *Documentação gerada automaticamente para suporte à continuidade do projeto BKO SYSTEM.*
+
+## Ajuda de Custo (transporte dos promotores)
+
+Rota `/ajuda-de-custo`. Antes de usar, execute no SQL Editor do Supabase, nesta ordem: `scripts/ajuda-de-custo.sql`, `scripts/ajuda-de-custo-pracas.sql`, `scripts/ajuda-de-custo-avulsos.sql` e `scripts/ajuda-de-custo-complementos.sql`. Para identificar promotores temporários (TMP), execute também `scripts/colaboradores-empresa.sql` e reimporte a planilha de colaboradores (a coluna EMPRESA passa a ser guardada).
+
+- **Valores por Dia**: valor de cada dia da semana por promotor, com histórico por data de vigência.
+- **Ocorrências**: férias, atestados, faltas e feriados locais (períodos de datas).
+- **Feriados**: nacionais (calculados) + feriados adicionais, para todos ou por **praça**, com opção "repete todo ano" (data fixa).
+- **Praças**: cidade/estado do promotor (uma por promotor). Feriados regionais valem automaticamente para quem está na praça.
+- **Cálculo do Mês**: competência = mês seguinte. Bruto = Σ valor do dia × dias do mês (sem feriados/ocorrências).
+  Descontos = dias **já pagos** em lançamentos fechados que agora têm ocorrência. Se descontos > bruto, paga 0 e o saldo
+  devedor é abatido no lançamento seguinte. "Fechar" grava o snapshot dos dias pagos (`ajuda_custo_dias`).
+- **Lançamentos avulsos** (botão ao final de cada promotor no Cálculo do Mês): **Internet** e **DIF - AJC** somam ao valor a lançar (DIF - AJC aceita valor negativo); **Alimentação** é lançamento à parte e não soma. "Calcular diferença" compara o valor pago nos dias já pagos com o valor vigente hoje (para mudança retroativa de roteiro/valores; a vigência do novo valor deve ser a data real da mudança) e preenche o DIF - AJC; ao fechar, esses dias passam a valer o valor ajustado.
+- **Acertos** (acerto imediato): quando o valor diário muda durante o mês e a diferença precisa ser paga na hora. Calcula, para o mês escolhido, a diferença entre o valor já pago (ou presumido, se o mês não está fechado no sistema) e o valor vigente, do dia da nova vigência até o fim do mês. Registra uma lista de pagamentos a lançar (com marca de "lançado"); os dias passam a valer o valor acertado, então o fechamento seguinte não cobra/paga a diferença de novo.
+- **Temporários e filtros**: promotores com EMPRESA = TMP aparecem com destaque (linha amarela e selo TMP) no Cálculo do Mês, no Histórico e em Acertos. O Cálculo do Mês tem busca por nome/matrícula e filtro por tipo de contratação (EMPRESA); cartões e exportação seguem o filtro.
+- **Dashboard**: indicadores e gráficos dos lançamentos fechados (evolução, descontos por motivo, valor por praça, ausências, ranking, afastados hoje).
+- **Histórico**: lançamentos fechados mês a mês; o último pode ser reaberto.
+
+Para zerar o módulo (ex.: após testes): `scripts/ajuda-de-custo-limpar.sql`.
+
+Motor de cálculo: `lib/ajuda-custo.ts` (puro). Testes: `node --test lib/ajuda-custo.test.mjs`.

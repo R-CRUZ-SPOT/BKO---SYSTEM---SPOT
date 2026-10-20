@@ -4,12 +4,13 @@ import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import Link from 'next/link';
-import { LayoutDashboard, Users, Smartphone, Phone, LogOut, Settings, Menu, X, Cake, Ticket, FileText } from 'lucide-react';
+import { LayoutDashboard, Users, Smartphone, Phone, LogOut, Settings, Menu, X, Cake, Ticket, FileText, Wallet } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { supabase } from '@/lib/supabase';
+import { useAcertosPendentes } from '@/hooks/use-acertos-pendentes';
 
 interface SidebarContentProps {
   navItems: { name: string; href: string; icon: any; badge?: number }[];
@@ -87,6 +88,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [birthdayCount, setBirthdayCount] = useState(0);
+  const acertosPendentes = useAcertosPendentes(!!user);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -157,6 +159,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     { name: 'Inventário de Celulares', href: '/aparelhos', icon: Smartphone },
     { name: 'Controle de Linhas', href: '/linhas', icon: Phone },
     { name: 'Gestão de Vouchers', href: '/vouchers', icon: Ticket },
+    { name: 'Ajuda de Custo', href: '/ajuda-de-custo', icon: Wallet, badge: acertosPendentes },
     { name: 'Cartas de Apresentação', href: '/cartas', icon: FileText },
     { name: 'Termos', href: '/termos', icon: FileText },
   ];

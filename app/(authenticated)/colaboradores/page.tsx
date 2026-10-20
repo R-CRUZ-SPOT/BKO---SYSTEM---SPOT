@@ -343,6 +343,7 @@ export default function ColaboradoresPage() {
         const hasAdmissao = hasField(['ADMISSAO', 'ADMISSÃO', 'DATA_ADMISSAO', 'DATA ADMISSAO', 'DATA DE ADMISSAO', 'DATA DE ADMISSÃO']);
         const hasJob = hasField(['JOB']);
         const hasCargo = hasField(['CARGO']);
+        const hasEmpresa = hasField(['EMPRESA']);
         const hasNascimento = hasField(['NASCIMENTO', 'DATA_NASCIMENTO', 'DATA NASCIMENTO', 'DATA DE NASCIMENTO']);
         const hasCpf = hasField(['CPF']);
         const hasRg = hasField(['RG', 'NUM RG', 'NUMERO RG', 'NÚMERO RG', 'NUM. RG']);
@@ -375,6 +376,8 @@ export default function ColaboradoresPage() {
           if (hasAdmissao) obj.data_admissao = parseImportDate(getColValue(row, ['ADMISSAO', 'ADMISSÃO', 'DATA_ADMISSAO', 'DATA ADMISSAO', 'DATA DE ADMISSAO', 'DATA DE ADMISSÃO']));
           if (hasJob) obj.job = getColValue(row, ['JOB']) || null;
           if (hasCargo) obj.cargo = getColValue(row, ['CARGO']) || null;
+          // tipo de contratação (ex.: TMP = temporário), usado na Ajuda de Custo
+          if (hasEmpresa) obj.empresa = getColValue(row, ['EMPRESA'])?.toString().trim() || null;
           if (hasNascimento) obj.data_nascimento = parseImportDate(getColValue(row, ['NASCIMENTO', 'DATA_NASCIMENTO', 'DATA NASCIMENTO', 'DATA DE NASCIMENTO']));
           if (hasCpf) obj.cpf = getColValue(row, ['CPF'])?.toString() || null;
           if (hasRg) obj.rg = getColValue(row, ['RG', 'NUM RG', 'NUMERO RG', 'NÚMERO RG', 'NUM. RG'])?.toString() || null;
