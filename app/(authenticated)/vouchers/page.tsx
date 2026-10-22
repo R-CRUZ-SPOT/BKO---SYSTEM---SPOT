@@ -15,6 +15,27 @@ import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { dataCache } from '@/lib/data-cache';
 
+const normMatricula = (m: unknown) => String(m ?? '').trim().replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toLowerCase();
+
+async function fetchColabsByMatricula() {
+  const map = new Map<string, { id: string; nome: string; matricula: string }>();
+  const STEP = 1000;
+  for (let from = 0; ; from += STEP) {
+    const { data, error } = await supabase
+      .from('colaboradores')
+      .select('id, nome, matricula')
+      .order('id')
+      .range(from, from + STEP - 1);
+    if (error) throw error;
+    (data || []).forEach((c: any) => {
+      const key = normMatricula(c.matricula);
+      if (key && !map.has(key)) map.set(key, c);
+    });
+    if (!data || data.length < STEP) break;
+  }
+  return map;
+}
+
 export default function VouchersPage() {
   const [allData, setAllData] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -39,6 +60,8 @@ export default function VouchersPage() {
   const [voucherToDelete, setVoucherToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
+  const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false);
+  const [dedupPlan, setDedupPlan] = useState<{ manter: any; remover: any[] }[] | null>(null);
 
   // Pagination & Sorting
   const [currentPage, setCurrentPage] = useState(1);
@@ -50,6 +73,37 @@ export default function VouchersPage() {
     loadVouchers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Vouchers com matrícula mas sem vínculo: resolve o colaborador pela matrícula (tolerante a espaços/zeros)
+  // e grava o colaborador_id para que o vínculo não dependa mais da importação.
+  async function relinkPendentes(list: any[]) {
+    const pendentes = list.filter((v: any) => v.matricula && !v.colaborador_id);
+    if (pendentes.length === 0) return;
+    try {
+      const colabs = await fetchColabsByMatricula();
+      const resolved = new Map<string, any>();
+      pendentes.forEach((v: any) => {
+        const c = colabs.get(normMatricula(v.matricula));
+        if (c) resolved.set(v.id, c);
+      });
+      if (resolved.size === 0) return;
+
+      setAllData(prev =>
+        prev.map(v => {
+          const c = resolved.get(v.id);
+          return c ? { ...v, colaborador_id: c.id, colaboradores: { id: c.id, nome: c.nome, matricula: c.matricula } } : v;
+        })
+      );
+
+      await Promise.all(
+        Array.from(resolved.entries()).map(([id, c]) =>
+          supabase.from('vouchers').update({ colaborador_id: c.id }).eq('id', id)
+        )
+      );
+    } catch (err) {
+      console.error('Erro ao revincular vouchers pendentes:', err);
+    }
+  }
 
   async function loadVouchers() {
     setLoading(true);
@@ -74,6 +128,7 @@ export default function VouchersPage() {
           if (simpleError) throw simpleError;
           const loadedSimple = simpleData || [];
           setAllData(loadedSimple);
+          relinkPendentes(loadedSimple);
 
           // Correção preguiçosa para valores antigos inconsistentes
           const inconsistent = loadedSimple.filter((v: any) => {
@@ -106,6 +161,7 @@ export default function VouchersPage() {
       
       const loadedData = data || [];
       setAllData(loadedData);
+      relinkPendentes(loadedData);
 
       // Correção preguiçosa para valores antigos inconsistentes
       const inconsistent = loadedData.filter((v: any) => {
@@ -196,16 +252,33 @@ export default function VouchersPage() {
         toast.loading('Processando importação...', { id: 'import' });
 
         // Get all collaborators to link by matricula
-        const { data: colabs } = await supabase.from('colaboradores').select('id, matricula');
-        const colabMap = new Map(colabs?.map(c => [c.matricula, c.id]));
+        const colabMap = await fetchColabsByMatricula();
 
         // Get existing vouchers to prevent duplicates
-        const { data: existingVouchers } = await supabase.from('vouchers').select('codigo');
+        const { data: existingVouchers } = await supabase.from('vouchers').select('id, codigo');
         const existingCodes = new Set(
           (existingVouchers || []).map((v: any) => (v.codigo || '').toString().trim().toLowerCase())
         );
+        const existingIds = new Map<string, string>(
+          (existingVouchers || []).map((v: any) => [(v.codigo || '').toString().trim().toLowerCase(), v.id])
+        );
+
+        // Aceita Date, serial do Excel ou texto dd/mm/aaaa
+        const parseDataAtribuicao = (raw: any): string | null => {
+          if (!raw) return null;
+          let d: Date | null = null;
+          if (raw instanceof Date) d = raw;
+          else if (typeof raw === 'number') d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+          else if (typeof raw === 'string') {
+            const p = raw.trim().split(/[\/\s]/);
+            if (p.length >= 3 && p[2].length === 4) d = new Date(Date.UTC(+p[2], +p[1] - 1, +p[0], 12));
+            else d = new Date(raw);
+          }
+          return d && isValid(d) ? d.toISOString() : null;
+        };
 
         const seenInBatch = new Set<string>();
+        const atualizacoes: { id: string; data_atribuicao: string; matricula: string | null; colaborador_id: string | null }[] = [];
         let duplicatesCount = 0;
 
         const formattedVouchers = data.map((row: any) => {
@@ -213,7 +286,7 @@ export default function VouchersPage() {
           const valor = findKey(row, 'Valor', 'Value') || '';
           const validadeRaw = findKey(row, 'Validade', 'Valid');
           const codigo = findKey(row, 'Cdigo', 'Código', 'Code') || '';
-          const matricula = findKey(row, 'Matricula', 'Registration')?.toString() || '';
+          const matricula = findKey(row, 'Matricula', 'Registration')?.toString().trim() || '';
 
           let validade = null;
           if (validadeRaw) {
@@ -232,7 +305,7 @@ export default function VouchersPage() {
             }
           }
 
-          const colaborador_id = matricula ? colabMap.get(matricula) : null;
+          const colaborador_id = matricula ? colabMap.get(normMatricula(matricula))?.id : null;
           const status = matricula || colaborador_id ? 'utilizado' : 'disponível';
 
           return {
@@ -242,14 +315,20 @@ export default function VouchersPage() {
             codigo,
             matricula: matricula || null,
             colaborador_id: colaborador_id || null,
-            status
+            status,
+            data_atribuicao: parseDataAtribuicao(findKey(row, 'atribui'))
           };
         }).filter(v => {
           if (!v.produto || !v.codigo) return false;
-          
+
           const cleanCode = (v.codigo || '').toString().trim().toLowerCase();
-          
+
           if (existingCodes.has(cleanCode) || seenInBatch.has(cleanCode)) {
+            // Voucher já cadastrado: só atualiza a data de atribuição (e o vínculo) vinda da planilha
+            const id = existingIds.get(cleanCode);
+            if (id && v.data_atribuicao && !seenInBatch.has(cleanCode)) {
+              atualizacoes.push({ id, data_atribuicao: v.data_atribuicao, matricula: v.matricula, colaborador_id: v.colaborador_id });
+            }
             duplicatesCount++;
             return false;
           }
@@ -258,8 +337,23 @@ export default function VouchersPage() {
           return true;
         });
 
+        if (atualizacoes.length > 0) {
+          await Promise.all(
+            atualizacoes.map(({ id, ...campos }) =>
+              supabase.from('vouchers').update({
+                data_atribuicao: campos.data_atribuicao,
+                ...(campos.matricula ? { matricula: campos.matricula } : {}),
+                ...(campos.colaborador_id ? { colaborador_id: campos.colaborador_id, status: 'utilizado' } : {})
+              }).eq('id', id)
+            )
+          );
+          loadVouchers();
+        }
+
         if (formattedVouchers.length === 0) {
-          if (duplicatesCount > 0) {
+          if (atualizacoes.length > 0) {
+            toast.success(`${atualizacoes.length} vouchers existentes tiveram a data de atribuição atualizada.`, { id: 'import', duration: 5000 });
+          } else if (duplicatesCount > 0) {
             toast.info(`Nenhum voucher novo foi importado. Todos os ${duplicatesCount} vouchers da planilha já estavam cadastrados no sistema.`, { id: 'import', duration: 5000 });
           } else {
             toast.error('Dados inválidos ou vazios. Verifique as colunas do arquivo.', { id: 'import' });
@@ -367,13 +461,36 @@ export default function VouchersPage() {
     try {
       // Find colab if matricula provided
       let colaborador_id = null;
-      if (formData.matricula) {
-        const { data } = await supabase.from('colaboradores').select('id').eq('matricula', formData.matricula).single();
-        if (data) colaborador_id = data.id;
+      const matriculaLimpa = formData.matricula.trim();
+      if (matriculaLimpa) {
+        const colabs = await fetchColabsByMatricula();
+        colaborador_id = colabs.get(normMatricula(matriculaLimpa))?.id ?? null;
+      }
+
+      const codigoLimpo = formData.codigo.trim();
+      if (!codigoLimpo) {
+        toast.error('Informe o código do voucher.');
+        return;
+      }
+
+      // Barra código repetido (ignora maiúsculas/minúsculas e espaços nas pontas)
+      const { data: mesmoCodigo, error: dupError } = await supabase
+        .from('vouchers')
+        .select('id, codigo')
+        .ilike('codigo', codigoLimpo.replace(/[\\%_]/g, '\\$&'));
+      if (dupError) throw dupError;
+      const repetido = (mesmoCodigo || []).some(
+        (v: any) => v.id !== editingVoucher?.id && (v.codigo || '').toString().trim().toLowerCase() === codigoLimpo.toLowerCase()
+      );
+      if (repetido) {
+        toast.error('Já existe um voucher com este código.');
+        return;
       }
 
       const payload = {
         ...formData,
+        codigo: codigoLimpo,
+        matricula: matriculaLimpa,
         colaborador_id,
         status: formData.matricula || colaborador_id ? 'utilizado' : formData.status,
         updated_at: new Date().toISOString()
@@ -415,70 +532,94 @@ export default function VouchersPage() {
     }
   };
 
+  // Pontuação de quem deve ser mantido entre vouchers com o mesmo código:
+  // colaborador vinculado > matrícula/status utilizado > data de atribuição mais recente > mais antigo.
+  const scoreKeep = (v: any) => (v.colaborador_id ? 4 : 0) + (v.status === 'utilizado' || v.matricula ? 2 : 0);
+
+  const pickToKeep = (a: any, b: any) => {
+    const sa = scoreKeep(a);
+    const sb = scoreKeep(b);
+    if (sa !== sb) return sa > sb ? a : b;
+    const da = a.data_atribuicao || '';
+    const db = b.data_atribuicao || '';
+    if (da !== db) return da > db ? a : b;
+    return (a.created_at || '') <= (b.created_at || '') ? a : b;
+  };
+
+  // Etapa 1: só analisa e mostra a prévia, nada é apagado aqui.
   const handleCleanDuplicates = async () => {
     if (isCleaningDuplicates) return;
     setIsCleaningDuplicates(true);
-    toast.loading('Analisando e removendo duplicados...', { id: 'dedup' });
+    toast.loading('Analisando duplicados...', { id: 'dedup' });
     try {
-      // 1. Fetch all vouchers to check for duplicates
-      const { data: allVouchers, error } = await supabase
-        .from('vouchers')
-        .select('id, codigo, status, matricula, colaborador_id, created_at')
-        .order('created_at', { ascending: true }); // older first
+      const allVouchers: any[] = [];
+      const STEP = 1000;
+      for (let from = 0; ; from += STEP) {
+        const { data, error } = await supabase
+          .from('vouchers')
+          .select('id, produto, codigo, status, matricula, colaborador_id, data_atribuicao, created_at')
+          .order('created_at', { ascending: true })
+          .order('id')
+          .range(from, from + STEP - 1);
+        if (error) throw error;
+        allVouchers.push(...(data || []));
+        if (!data || data.length < STEP) break;
+      }
 
-      if (error) throw error;
-      
-      if (!allVouchers || allVouchers.length === 0) {
+      if (allVouchers.length === 0) {
         toast.info('Nenhum voucher cadastrado.', { id: 'dedup' });
         return;
       }
 
-      // 2. Classify duplicates
-      const seenCodes = new Map<string, any>();
-      const idsToDelete: string[] = [];
-
+      const groups = new Map<string, any[]>();
       allVouchers.forEach((v: any) => {
         const cleanCode = (v.codigo || '').toString().trim().toLowerCase();
-        if (!cleanCode) return; // skip empty
-
-        if (seenCodes.has(cleanCode)) {
-          const existing = seenCodes.get(cleanCode);
-          
-          // Priority logic: If current duplicate has customized assignment / utilised status, Keep it and dump the other.
-          const currentIsUtilized = v.status === 'utilizado' || !!v.colaborador_id || !!v.matricula;
-          const existingIsUtilized = existing.status === 'utilizado' || !!existing.colaborador_id || !!existing.matricula;
-
-          if (currentIsUtilized && !existingIsUtilized) {
-            idsToDelete.push(existing.id);
-            seenCodes.set(cleanCode, v); // update mapping to the utilized one
-          } else {
-            idsToDelete.push(v.id);
-          }
-        } else {
-          seenCodes.set(cleanCode, v);
-        }
+        if (!cleanCode) return;
+        const list = groups.get(cleanCode);
+        if (list) list.push(v);
+        else groups.set(cleanCode, [v]);
       });
 
-      if (idsToDelete.length === 0) {
+      const plan: { manter: any; remover: any[] }[] = [];
+      groups.forEach(list => {
+        if (list.length < 2) return;
+        const manter = list.reduce(pickToKeep);
+        plan.push({ manter, remover: list.filter(v => v.id !== manter.id) });
+      });
+
+      if (plan.length === 0) {
         toast.success('Não há nenhum voucher duplicado no sistema!', { id: 'dedup', duration: 4000 });
         return;
       }
 
-      // 3. Delete duplicates in database
-      const { error: deleteError } = await supabase
-        .from('vouchers')
-        .delete()
-        .in('id', idsToDelete);
+      toast.dismiss('dedup');
+      setDedupPlan(plan);
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Erro ao analisar duplicados: ' + err.message, { id: 'dedup' });
+    } finally {
+      setIsCleaningDuplicates(false);
+    }
+  };
 
-      if (deleteError) throw deleteError;
-
-      toast.success(`Ação concluída! Foram localizados e removidos ${idsToDelete.length} vouchers duplicados.`, { id: 'dedup', duration: 5000 });
+  // Etapa 2: após a confirmação do usuário, apaga os duplicados listados na prévia.
+  const confirmCleanDuplicates = async () => {
+    if (!dedupPlan || isRemovingDuplicates) return;
+    setIsRemovingDuplicates(true);
+    try {
+      const idsToDelete = dedupPlan.flatMap(g => g.remover.map(v => v.id));
+      for (let i = 0; i < idsToDelete.length; i += 200) {
+        const { error } = await supabase.from('vouchers').delete().in('id', idsToDelete.slice(i, i + 200));
+        if (error) throw error;
+      }
+      toast.success(`${idsToDelete.length} vouchers duplicados removidos.`, { duration: 5000 });
+      setDedupPlan(null);
       loadVouchers();
     } catch (err: any) {
       console.error(err);
-      toast.error('Erro ao limpar banco de dados: ' + err.message, { id: 'dedup' });
+      toast.error('Erro ao remover duplicados: ' + err.message);
     } finally {
-      setIsCleaningDuplicates(false);
+      setIsRemovingDuplicates(false);
     }
   };
 
@@ -533,15 +674,23 @@ export default function VouchersPage() {
             <Download className="w-4 h-4 mr-2 text-zinc-500" />
             Exportar
           </Button>
-          <Button 
-            variant="outline" 
-            className="rounded-xl border-red-200 hover:border-red-300 text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
-            onClick={handleCleanDuplicates}
-            disabled={isCleaningDuplicates}
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Limpar Duplicados
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="rounded-xl border-zinc-200 hover:bg-zinc-50" aria-label="Mais ações">
+                <MoreVertical className="w-4 h-4 text-zinc-500" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                className="text-rose-600 hover:bg-rose-50"
+                onClick={handleCleanDuplicates}
+                disabled={isCleaningDuplicates}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Limpar duplicados...
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button 
             variant="default" 
             className="rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-600/20"
@@ -824,6 +973,37 @@ export default function VouchersPage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicates Dialog */}
+      <Dialog open={!!dedupPlan} onOpenChange={(open) => { if (!open && !isRemovingDuplicates) setDedupPlan(null); }}>
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black uppercase tracking-tight text-rose-600">Limpar Duplicados</DialogTitle>
+            <DialogDescription>
+              {dedupPlan?.reduce((s, g) => s + g.remover.length, 0)} voucher(s) serão excluídos em {dedupPlan?.length} código(s) repetido(s). Esta ação é irreversível.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-72 overflow-y-auto space-y-2 py-2">
+            {dedupPlan?.map(g => (
+              <div key={g.manter.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-100">
+                <p className="text-[10px] font-mono text-zinc-700 break-all">{g.manter.codigo}</p>
+                <p className="text-[10px] text-emerald-700 font-bold mt-1">
+                  Mantém: {g.manter.colaborador_id ? 'com colaborador' : g.manter.matricula ? `MAT ${g.manter.matricula}` : g.manter.status}
+                </p>
+                <p className="text-[10px] text-rose-600 font-bold">
+                  Exclui: {g.remover.length} cópia(s) ({g.remover.map(v => (v.colaborador_id ? 'com colaborador' : v.matricula ? `MAT ${v.matricula}` : v.status)).join(', ')})
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" className="flex-1 h-12 rounded-xl" onClick={() => setDedupPlan(null)} disabled={isRemovingDuplicates}>Cancelar</Button>
+            <Button variant="destructive" className="flex-1 h-12 rounded-xl" onClick={confirmCleanDuplicates} disabled={isRemovingDuplicates}>
+              {isRemovingDuplicates ? 'Excluindo...' : 'Sim, Excluir'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
