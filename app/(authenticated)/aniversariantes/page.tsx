@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import Image from 'next/image';
+import { gerarArteAniversario } from '@/lib/arte-aniversario';
 
 export default function AniversariantesPage() {
   const [colaboradores, setColaboradores] = useState<any[]>([]);
@@ -78,12 +79,35 @@ export default function AniversariantesPage() {
           throw error;
         }
       };
+      data = await anexarVouchersPorMatricula(data || []);
       setColaboradores(data || []);
       dataCache.set('aniversariantes_active', data || []);
     } catch (error) {
       console.error('Erro ao carregar aniversariantes:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Vouchers importados só com matrícula (sem colaborador_id) não vêm no join da consulta principal.
+  const normMatricula = (m: unknown) => String(m ?? '').trim().replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toLowerCase();
+
+  async function anexarVouchersPorMatricula(colabs: any[]) {
+    try {
+      const { data: porMatricula, error } = await supabase
+        .from('vouchers')
+        .select('*')
+        .not('matricula', 'is', null);
+      if (error || !porMatricula?.length) return colabs;
+
+      return colabs.map((c: any) => {
+        const key = normMatricula(c.matricula);
+        const jaTem = new Set((c.vouchers || []).map((v: any) => v.id));
+        const extras = key ? porMatricula.filter((v: any) => normMatricula(v.matricula) === key && !jaTem.has(v.id)) : [];
+        return extras.length ? { ...c, vouchers: [...(c.vouchers || []), ...extras] } : c;
+      });
+    } catch {
+      return colabs;
     }
   }
 
@@ -179,12 +203,65 @@ export default function AniversariantesPage() {
     }
   };
 
+  // WhatsApp (wa.me) só aceita texto: a arte é copiada para a área de transferência
+  // e o usuário cola (Ctrl+V) na conversa que abre em seguida.
+  const handleEnviarComArte = async (colab: any, whatsappUrl: string) => {
+    const win = window.open('about:blank', '_blank');
+    const toastId = toast.loading('Gerando arte de aniversário...');
+    try {
+      const blob = await gerarArteAniversario(colab.nome, colab.foto_url);
+      let copiada = false;
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        copiada = true;
+      } catch {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `aniversario-${colab.nome.split(' ')[0].toLowerCase()}.png`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+      toast.success(
+        copiada ? 'Arte copiada! Cole na conversa com Ctrl+V.' : 'Arte baixada! Anexe na conversa do WhatsApp.',
+        { id: toastId }
+      );
+    } catch (error) {
+      console.error('Erro ao gerar arte:', error);
+      toast.error('Não foi possível gerar a arte. Abrindo WhatsApp só com a mensagem.', { id: toastId });
+    }
+    if (win) win.location.href = whatsappUrl;
+    else window.open(whatsappUrl, '_blank');
+  };
+
   const changeMonth = (offset: number) => {
     setCurrentDate(prev => offset > 0 ? addMonths(prev, offset) : subMonths(prev, Math.abs(offset)));
   };
 
   const currentMonth = currentDate.getMonth();
   
+  // Voucher a citar na mensagem: o atribuído neste ano; sem data_atribuicao (coluna
+  // ausente ou voucher antigo), usa o único voucher vinculado ao colaborador.
+  const findVoucherDoAno = (vouchers: any[] = []) => {
+    const currentYear = new Date().getFullYear();
+    // Mais recente primeiro: data de atribuição e, em empate, a maior validade
+    const doAno = (vouchers || [])
+      .filter((v: any) => v.data_atribuicao && parseISO(v.data_atribuicao).getFullYear() === currentYear)
+      .sort((a: any, b: any) =>
+        b.data_atribuicao.localeCompare(a.data_atribuicao) || String(b.validade || '').localeCompare(String(a.validade || ''))
+      )[0];
+    if (doAno) return doAno;
+    const semData = (vouchers || []).filter((v: any) => !v.data_atribuicao);
+    return semData.length === 1 && vouchers.length === 1 ? semData[0] : undefined;
+  };
+
+  // O código vem da planilha como "Código : 123 Senha : 456"; evita repetir o rótulo na mensagem
+  const montarMensagemAniversario = (colab: any, voucher?: any) => {
+    const nome = colab.nome.split(' ')[0];
+    if (!voucher) return `Olá ${nome}! Feliz aniversário! \u{1F382} Aproveite muito o seu dia!`;
+    const codigo = String(voucher.codigo || 'N/A').replace(/^\s*c[óo]digo\s*:?\s*/i, '').replace(/senha\s*:/i, 'senha:').trim();
+    return `Olá ${nome}! Feliz aniversário! \u{1F382} Aqui está seu presente do BKO SYSTEM: seu voucher ${voucher.produto}, código: ${codigo}. Aproveite seu dia!`;
+  };
+
   const checkEligibility = (admissionDate: string, birthDate: string, vouchers: any[] = []) => {
     if (!admissionDate || !birthDate) return { eligible: false, months: 0, alreadyReceivedThisYear: false };
     
@@ -477,20 +554,14 @@ export default function AniversariantesPage() {
                                const { alreadyReceivedThisYear } = checkEligibility(colab.data_admissao, colab.data_nascimento, colab.vouchers);
                                
                                // Encontra o voucher deste ano
-                               const currentYear = new Date().getFullYear();
-                               const voucherThisYear = colab.vouchers?.find((v: any) => {
-                                 const attrDate = v.data_atribuicao ? parseISO(v.data_atribuicao) : null;
-                                 return attrDate && attrDate.getFullYear() === currentYear;
-                               });
+                               const voucherThisYear = findVoucherDoAno(colab.vouchers);
 
                                // Pega o número de telefone (primeira linha vinculada)
                                const phone = colab.linhas?.[0] ? `${colab.linhas[0].ddd}${colab.linhas[0].numero}`.replace(/\D/g, '') : null;
 
                                // Se tem telefone, prioriza WhatsApp mesmo como fallback de Parabéns
                                if (phone) {
-                                 const message = voucherThisYear 
-                                   ? `Olá ${colab.nome.split(' ')[0]}! Feliz aniversário! \u{1F382} Aqui está seu presente do BKO SYSTEM: seu voucher ${voucherThisYear.produto} código: ${voucherThisYear.codigo || 'N/A'}. Aproveite seu dia!`
-                                   : `Olá ${colab.nome.split(' ')[0]}! Feliz aniversário! \u{1F382} Aproveite muito o seu dia!`;
+                                 const message = montarMensagemAniversario(colab, voucherThisYear);
                                  
                                  const encodedMessage = encodeURIComponent(message);
                                  
@@ -498,17 +569,13 @@ export default function AniversariantesPage() {
                                    <Button 
                                      key={`wa-btn-highlight-${colab.id}`}
                                      className="bg-emerald-500 text-white rounded-xl h-10 px-4 font-black uppercase text-[9px] tracking-widest hover:bg-emerald-600 transition-all shadow-md"
-                                     asChild
+                                     onClick={(e) => {
+                                       e.stopPropagation();
+                                       handleEnviarComArte(colab, `https://api.whatsapp.com/send?phone=55${phone}&text=${encodedMessage}`);
+                                     }}
                                    >
-                                     <a 
-                                       href={`https://wa.me/55${phone}?text=${encodedMessage}`}
-                                       target="_blank"
-                                       rel="noopener noreferrer"
-                                       onClick={(e) => e.stopPropagation()}
-                                     >
-                                       <Smartphone className="w-3.5 h-3.5 mr-1.5" />
-                                       Enviar Parabéns
-                                     </a>
+                                     <Smartphone className="w-3.5 h-3.5 mr-1.5" />
+                                     Enviar Parabéns
                                    </Button>
                                  );
                                }
@@ -657,15 +724,9 @@ export default function AniversariantesPage() {
                                   const phone = colab.linhas?.[0] ? `${colab.linhas[0].ddd}${colab.linhas[0].numero}`.replace(/\D/g, '') : null;
                                   
                                   if (phone) {
-                                    const currentYear = new Date().getFullYear();
-                                    const voucherThisYear = colab.vouchers?.find((v: any) => {
-                                      const attrDate = v.data_atribuicao ? parseISO(v.data_atribuicao) : null;
-                                      return attrDate && attrDate.getFullYear() === currentYear;
-                                    });
+                                    const voucherThisYear = findVoucherDoAno(colab.vouchers);
 
-                                    const message = voucherThisYear 
-                                      ? `Olá ${colab.nome.split(' ')[0]}! Feliz aniversário! \u{1F382} Aqui está seu presente do BKO SYSTEM: seu voucher ${voucherThisYear.produto} código: ${voucherThisYear.codigo || 'N/A'}. Aproveite seu dia!`
-                                      : `Olá ${colab.nome.split(' ')[0]}! Feliz aniversário! \u{1F382} Aproveite muito o seu dia!`;
+                                    const message = montarMensagemAniversario(colab, voucherThisYear);
                                     
                                     const encodedMessage = encodeURIComponent(message);
                                     
@@ -674,16 +735,12 @@ export default function AniversariantesPage() {
                                         variant="ghost" 
                                         size="icon"
                                         className="h-7 w-7 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 shadow-sm"
-                                        asChild
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleEnviarComArte(colab, `https://api.whatsapp.com/send?phone=55${phone}&text=${encodedMessage}`);
+                                        }}
                                       >
-                                        <a 
-                                          href={`https://wa.me/55${phone}?text=${encodedMessage}`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          <Smartphone className="w-3 h-3" />
-                                        </a>
+                                        <Smartphone className="w-3 h-3" />
                                       </Button>
                                     );
                                   }
