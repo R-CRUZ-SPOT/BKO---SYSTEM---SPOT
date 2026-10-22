@@ -13,7 +13,7 @@ import { colunasValor, linhaParaTarifa } from '@/lib/ajuda-custo-data';
 import { DIAS_SEMANA, formatarData, competenciaPadrao, moeda } from '@/lib/ajuda-custo';
 import { avisarAcertosMudaram } from '@/hooks/use-acertos-pendentes';
 import { ImportarValores } from '@/components/ajuda-custo/importar-valores';
-import { ColabPicker, rotuloCampo, useColaboradoresAtivos } from '@/components/ajuda-custo/colab-picker';
+import { ColabPicker, rotuloCampo, useColaboradoresAtivos, useColaboradoresPorIds } from '@/components/ajuda-custo/colab-picker';
 
 // Ordem de exibição: segunda a domingo (índice do array de valores: 0=dom ... 6=sab)
 const ORDEM = [1, 2, 3, 4, 5, 6, 0];
@@ -23,15 +23,26 @@ interface LinhaValor {
   colaborador_id: string;
   vigencia_inicio: string;
   valores: number[];
+  criado_em?: string;
 }
 
 const dataCurta = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}`;
+
+interface GrupoVigencia {
+  vigencia: string;
+  ids: string[]; // registros que podem ser removidos
+  protegidos: number; // registros que são a única vigência do promotor (mantidos)
+  criado: string;
+}
 
 export default function ValoresPage() {
   const colaboradores = useColaboradoresAtivos();
   const [linhas, setLinhas] = useState<LinhaValor[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
+  const [ocultarInativos, setOcultarInativos] = useState(false);
+  const [remocaoAberta, setRemocaoAberta] = useState(false);
+  const [removendo, setRemovendo] = useState(false);
 
   const [formAberto, setFormAberto] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -50,7 +61,7 @@ export default function ValoresPage() {
     if (error) {
       toast.error('Erro ao carregar valores: ' + error.message);
     } else {
-      setLinhas((data ?? []).map((r: any) => ({ id: r.id, ...linhaParaTarifa(r) })));
+      setLinhas((data ?? []).map((r: any) => ({ id: r.id, criado_em: r.created_at, ...linhaParaTarifa(r) })));
     }
     const [pr, vin] = await Promise.all([
       supabase.from('ajuda_custo_pracas').select('id, nome'),
@@ -68,7 +79,9 @@ export default function ValoresPage() {
     carregar();
   }, []);
 
-  const nomePorId = useMemo(() => new Map(colaboradores.map((c) => [c.id, c])), [colaboradores]);
+  // nomes de TODOS os promotores com valores, inclusive os inativados em Gestão de Pessoas
+  const idsComValores = useMemo(() => [...new Set(linhas.map((l) => l.colaborador_id))], [linhas]);
+  const nomePorId = useColaboradoresPorIds(idsComValores);
 
   // Tarifa em vigor hoje de cada promotor (se ainda não há nenhuma em vigor, a próxima agendada)
   const atuais = useMemo(() => {
@@ -88,11 +101,12 @@ export default function ValoresPage() {
     return [...mapa.values()]
       .filter((l) => {
         const c = nomePorId.get(l.colaborador_id);
+        if (ocultarInativos && c?.status === 'inativo') return false;
         if (!busca) return true;
         return `${c?.nome ?? ''} ${c?.matricula ?? ''}`.toLowerCase().includes(busca.toLowerCase());
       })
       .sort((a, b) => (nomePorId.get(a.colaborador_id)?.nome ?? '').localeCompare(nomePorId.get(b.colaborador_id)?.nome ?? ''));
-  }, [linhas, nomePorId, busca]);
+  }, [linhas, nomePorId, busca, ocultarInativos]);
 
   // Com `base`, edita aquele registro (inclusive a data de vigência); sem, cadastra novos valores.
   function abrirForm(base?: LinhaValor) {
@@ -132,6 +146,41 @@ export default function ValoresPage() {
     carregar();
   }
 
+  // vigências cadastradas, para remover em lote (ex.: importação feita por engano)
+  const grupos = useMemo<GrupoVigencia[]>(() => {
+    const porColab = new Map<string, number>();
+    linhas.forEach((l) => porColab.set(l.colaborador_id, (porColab.get(l.colaborador_id) ?? 0) + 1));
+    const mapa = new Map<string, GrupoVigencia>();
+    linhas.forEach((l) => {
+      const g = mapa.get(l.vigencia_inicio) ?? { vigencia: l.vigencia_inicio, ids: [], protegidos: 0, criado: '' };
+      if ((porColab.get(l.colaborador_id) ?? 0) > 1) g.ids.push(l.id);
+      else g.protegidos += 1;
+      const dia = (l.criado_em ?? '').slice(0, 10);
+      if (dia > g.criado) g.criado = dia;
+      mapa.set(l.vigencia_inicio, g);
+    });
+    return [...mapa.values()].sort((a, b) => b.vigencia.localeCompare(a.vigencia));
+  }, [linhas]);
+
+  async function removerGrupo(g: GrupoVigencia) {
+    const ok = window.confirm(
+      `Remover ${g.ids.length} registro(s) com vigência em ${formatarData(g.vigencia)}?\n\nOs promotores continuam com as outras vigências deles. Esta ação não tem volta.`
+    );
+    if (!ok) return;
+    setRemovendo(true);
+    for (let i = 0; i < g.ids.length; i += 100) {
+      const { error } = await supabase.from('ajuda_custo_valores').delete().in('id', g.ids.slice(i, i + 100));
+      if (error) {
+        setRemovendo(false);
+        return toast.error('Erro ao remover: ' + error.message);
+      }
+    }
+    setRemovendo(false);
+    toast.success(`${g.ids.length} registro(s) removido(s).`);
+    avisarAcertosMudaram();
+    carregar();
+  }
+
   const historico = linhas.filter((l) => l.colaborador_id === historicoDe);
 
   return (
@@ -143,6 +192,12 @@ export default function ValoresPage() {
             <Input placeholder="Pesquisar promotor..." className="pl-10 h-10 rounded-xl" value={busca} onChange={(e) => setBusca(e.target.value)} />
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-600">
+              <input type="checkbox" checked={ocultarInativos} onChange={(e) => setOcultarInativos(e.target.checked)} /> Ocultar inativos
+            </label>
+            <Button variant="outline" className="rounded-xl" title="Remover todas as linhas de uma vigência (ex.: importação feita por engano)" onClick={() => setRemocaoAberta(true)}>
+              <Trash2 className="mr-2 h-4 w-4" /> Remover vigência
+            </Button>
             <ImportarValores colaboradores={colaboradores} onImportado={() => { avisarAcertosMudaram(); carregar(); }} />
             <Button className="rounded-xl bg-emerald-600 hover:bg-emerald-700" onClick={() => abrirForm()}>
               <Plus className="w-4 h-4 mr-2" /> Novo promotor
@@ -171,9 +226,9 @@ export default function ValoresPage() {
                 atuais.map((l) => {
                   const c = nomePorId.get(l.colaborador_id);
                   return (
-                    <TableRow key={l.id}>
+                    <TableRow key={l.id} className={c?.status === 'inativo' ? 'opacity-60' : undefined}>
                       <TableCell className="pl-5 pr-2 py-3 min-w-[170px]">
-                        <p className="text-sm font-bold text-zinc-900">{c?.nome ?? '—'}</p>
+                        <p className="text-sm font-bold text-zinc-900">{c?.nome ?? 'Colaborador não encontrado'}{c?.status === 'inativo' && <span className="ml-2 rounded-md border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 align-middle text-[9px] font-black uppercase tracking-wider text-zinc-500">inativo</span>}</p>
                         <p className="text-[10px] text-zinc-500">MAT: {c?.matricula}</p>
                       </TableCell>
                       <TableCell className="px-2 text-xs text-zinc-600 max-w-[130px]">{pracaDoColab.get(l.colaborador_id) || <span className="text-zinc-300">sem praça</span>}</TableCell>
@@ -222,7 +277,12 @@ export default function ValoresPage() {
           <form onSubmit={salvar} className="space-y-4 pt-2">
             <div className="space-y-2">
               <label className={rotuloCampo}>Promotor</label>
-              <ColabPicker colaboradores={colaboradores} value={colabId} onChange={setColabId} disabled={!!editandoId} />
+              <ColabPicker
+                colaboradores={editandoId && nomePorId.get(colabId) && !colaboradores.some((c) => c.id === colabId) ? [...colaboradores, nomePorId.get(colabId)!] : colaboradores}
+                value={colabId}
+                onChange={setColabId}
+                disabled={!!editandoId}
+              />
             </div>
             <div className="space-y-2">
               <label className={rotuloCampo}>Vale a partir de</label>
@@ -246,6 +306,37 @@ export default function ValoresPage() {
               <Button type="submit" disabled={salvando} className="bg-emerald-600 hover:bg-emerald-700 rounded-xl">{salvando ? 'Salvando...' : 'Salvar'}</Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={remocaoAberta} onOpenChange={setRemocaoAberta}>
+        <DialogContent className="sm:max-w-xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black uppercase tracking-tight text-zinc-900">Remover vigência</DialogTitle>
+            <DialogDescription>
+              Apaga de uma vez todos os valores de uma data de vigência, por exemplo os criados por uma importação feita por engano. Promotores que só têm essa vigência são mantidos.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] divide-y divide-zinc-100 overflow-y-auto rounded-xl border border-zinc-200">
+            {grupos.length === 0 ? (
+              <p className="p-4 text-sm text-zinc-400">Nenhuma vigência cadastrada.</p>
+            ) : (
+              grupos.map((g) => (
+                <div key={g.vigencia} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-bold text-zinc-900">Vigência {formatarData(g.vigencia)}</p>
+                    <p className="text-[11px] text-zinc-500">
+                      {g.ids.length + g.protegidos} registro(s){g.criado && ` · último cadastro em ${formatarData(g.criado)}`}
+                      {g.protegidos > 0 && ` · ${g.protegidos} é a única vigência do promotor (mantido)`}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" disabled={g.ids.length === 0 || removendo} onClick={() => removerGrupo(g)} className="rounded-xl text-rose-600 hover:bg-rose-50">
+                    Remover {g.ids.length}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

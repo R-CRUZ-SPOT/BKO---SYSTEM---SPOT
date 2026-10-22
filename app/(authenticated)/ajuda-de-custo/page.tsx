@@ -145,7 +145,18 @@ export default function CalculoPage() {
     carregar();
   }
 
+  // competência que já começou (ou passou): em geral já foi paga, então o cálculo é só uma simulação com os dados de hoje
+  const jaIniciado = competencia <= new Date().toLocaleDateString('sv-SE').slice(0, 7);
+
   async function fechar() {
+    if (
+      jaIniciado &&
+      !window.confirm(
+        `Atenção: ${nomeCompetencia(competencia)} já começou.\n\nSe este mês já foi pago, NÃO feche: o fechamento registraria como pagos só os dias deste cálculo, e os descontos de atestado, falta ou férias cadastrados hoje deixariam de ser feitos na folha seguinte.\n\nFechar mesmo assim?`
+      )
+    ) {
+      return;
+    }
     const ok = window.confirm(
       `Fechar o lançamento de ${nomeCompetencia(competencia)}?\n\nIsso grava o histórico do mês e passa a valer como base dos descontos dos próximos lançamentos. Você pode reabrir depois, se for o último mês fechado.`
     );
@@ -187,6 +198,16 @@ export default function CalculoPage() {
         />
       ) : (
         <>
+          {jaIniciado && (
+            <div className="flex gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-xs text-rose-900">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <p>
+                <strong>{nomeCompetencia(competencia)} já começou.</strong> Se este mês já foi pago, esta tela é só uma <strong>simulação com as informações de hoje</strong>: os dias com atestado, falta ou
+                férias cadastrados agora aparecem aqui como &quot;não pagos&quot;, mas na prática já foram pagos e serão <strong>descontados na folha de {nomeCompetencia(somarMeses(competencia, 1))}</strong>.
+                Não feche este mês se ele já foi pago.
+              </p>
+            </div>
+          )}
           {situacao && !situacao.ok && (
             <Aviso>
               <strong>Prévia:</strong> {situacao.motivo} Os valores abaixo simulam os meses anteriores ainda abertos fechando em sequência e não podem ser fechados agora.

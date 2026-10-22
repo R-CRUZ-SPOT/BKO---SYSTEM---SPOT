@@ -207,6 +207,13 @@ const toDate = (iso: string) => {
 
 const toISO = (d: Date) => d.toISOString().slice(0, 10);
 
+/** Soma `n` dias corridos a uma data ISO (n pode ser negativo). */
+export function somarDias(iso: string, n: number): string {
+  const d = toDate(iso);
+  d.setUTCDate(d.getUTCDate() + n);
+  return toISO(d);
+}
+
 export const diaSemana = (iso: string) => toDate(iso).getUTCDay();
 
 export function diasDoMes(competencia: string): string[] {
@@ -600,3 +607,18 @@ export function verificarFechamento(competencia: string, fechadas: string[], ini
 
 export const moeda = (n: number) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+const UFS_BR = new Set(['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO']);
+
+/** Separa cidade e UF do nome de uma praça ("Salvador/BA", "SALVADOR - BA"). UF nula quando o nome não termina em uma UF válida. */
+export function separarPraca(nome: string): { cidade: string; uf: string | null } {
+  const m = nome.trim().match(/^(.*?)(?:\s*[-–/,]\s*([A-Za-z]{2})|\s+([A-Z]{2}))\s*$/);
+  const uf = (m?.[2] ?? m?.[3] ?? '').toUpperCase();
+  if (!m || !UFS_BR.has(uf)) return { cidade: nome.trim(), uf: null };
+  return { cidade: m[1].trim(), uf };
+}
+
+/** Minúsculas, sem acentos e com espaços normalizados — para buscar e comparar nomes de praça. */
+export function normalizarTexto(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}

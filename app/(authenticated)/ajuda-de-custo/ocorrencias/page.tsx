@@ -9,9 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { supabase } from '@/lib/supabase';
-import { TIPO_LABEL, type TipoOcorrencia, formatarData } from '@/lib/ajuda-custo';
+import { TIPO_LABEL, type TipoOcorrencia, formatarData, somarDias } from '@/lib/ajuda-custo';
 import { avisarAcertosMudaram } from '@/hooks/use-acertos-pendentes';
-import { ColabPicker, rotuloCampo, useColaboradoresAtivos } from '@/components/ajuda-custo/colab-picker';
+import { ColabPicker, rotuloCampo, useColaboradoresAtivos, useColaboradoresPorIds } from '@/components/ajuda-custo/colab-picker';
 import { cn } from '@/lib/utils';
 
 const TIPOS = Object.keys(TIPO_LABEL) as TipoOcorrencia[];
@@ -50,12 +50,12 @@ export default function OcorrenciasPage() {
 
   const [formAberto, setFormAberto] = useState(false);
   const [editando, setEditando] = useState<Ocorrencia | null>(null);
-  const [form, setForm] = useState({ colaborador_id: '', tipo: 'atestado' as TipoOcorrencia, data_inicio: '', data_fim: '', observacao: '' });
+  const [form, setForm] = useState({ colaborador_id: '', tipo: 'atestado' as TipoOcorrencia, data_inicio: '', dias: '', observacao: '' });
   const [salvando, setSalvando] = useState(false);
 
   async function carregar() {
     setLoading(true);
-    const { data, error } = await supabase.from('ajuda_custo_ocorrencias').select('*').order('data_inicio', { ascending: false }).limit(2000);
+    const { data, error } = await supabase.from('ajuda_custo_ocorrencias').select('*').order('created_at', { ascending: false }).limit(2000);
     if (error) toast.error('Erro ao carregar ocorrências: ' + error.message);
     else setLista((data as Ocorrencia[]) ?? []);
     setLoading(false);
@@ -66,7 +66,9 @@ export default function OcorrenciasPage() {
     carregar();
   }, []);
 
-  const nomePorId = useMemo(() => new Map(colaboradores.map((c) => [c.id, c])), [colaboradores]);
+  // nomes de todos os promotores com ocorrência, inclusive os inativados em Gestão de Pessoas
+  const idsComOcorrencia = useMemo(() => [...new Set(lista.map((o) => o.colaborador_id))], [lista]);
+  const nomePorId = useColaboradoresPorIds(idsComOcorrencia);
 
   const visiveis = useMemo(() => {
     const q = busca.trim().toLowerCase();
@@ -82,8 +84,8 @@ export default function OcorrenciasPage() {
     setEditando(o ?? null);
     setForm(
       o
-        ? { colaborador_id: o.colaborador_id, tipo: o.tipo, data_inicio: o.data_inicio, data_fim: o.data_fim, observacao: o.observacao ?? '' }
-        : { colaborador_id: '', tipo: filtro === 'todos' ? 'atestado' : filtro, data_inicio: '', data_fim: '', observacao: '' }
+        ? { colaborador_id: o.colaborador_id, tipo: o.tipo, data_inicio: o.data_inicio, dias: String(contarDias(o.data_inicio, o.data_fim)), observacao: o.observacao ?? '' }
+        : { colaborador_id: '', tipo: filtro === 'todos' ? 'atestado' : filtro, data_inicio: '', dias: '', observacao: '' }
     );
     setFormAberto(true);
   }
@@ -91,10 +93,18 @@ export default function OcorrenciasPage() {
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     if (!form.colaborador_id) return toast.error('Selecione o promotor.');
-    if (form.data_fim < form.data_inicio) return toast.error('A data final não pode ser anterior à inicial.');
+    const dias = Number(form.dias);
+    if (!Number.isInteger(dias) || dias < 1 || dias > 3650) return toast.error('Informe a quantidade de dias (número inteiro, a partir de 1).');
 
     setSalvando(true);
-    const payload = { ...form, observacao: form.observacao.trim() || null };
+    // o último dia é calculado: primeiro dia + quantidade de dias corridos - 1
+    const payload = {
+      colaborador_id: form.colaborador_id,
+      tipo: form.tipo,
+      data_inicio: form.data_inicio,
+      data_fim: somarDias(form.data_inicio, dias - 1),
+      observacao: form.observacao.trim() || null,
+    };
     const { error } = editando
       ? await supabase.from('ajuda_custo_ocorrencias').update(payload).eq('id', editando.id)
       : await supabase.from('ajuda_custo_ocorrencias').insert(payload);
@@ -165,7 +175,7 @@ export default function OcorrenciasPage() {
                   return (
                     <TableRow key={o.id}>
                       <TableCell className="px-6 py-3">
-                        <p className="text-sm font-bold text-zinc-900">{c?.nome ?? '—'}</p>
+                        <p className="text-sm font-bold text-zinc-900">{c?.nome ?? 'Colaborador não encontrado'}{c?.status === 'inativo' && <span className="ml-2 rounded-md border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 align-middle text-[9px] font-black uppercase tracking-wider text-zinc-500">inativo</span>}</p>
                         <p className="text-[10px] text-zinc-500">MAT: {c?.matricula}</p>
                       </TableCell>
                       <TableCell>
@@ -198,7 +208,7 @@ export default function OcorrenciasPage() {
           <form onSubmit={salvar} className="space-y-4 pt-2">
             <div className="space-y-2">
               <label className={rotuloCampo}>Promotor</label>
-              <ColabPicker colaboradores={colaboradores} value={form.colaborador_id} onChange={(id) => setForm({ ...form, colaborador_id: id })} />
+              <ColabPicker colaboradores={form.colaborador_id && nomePorId.get(form.colaborador_id) && !colaboradores.some((c) => c.id === form.colaborador_id) ? [...colaboradores, nomePorId.get(form.colaborador_id)!] : colaboradores} value={form.colaborador_id} onChange={(id) => setForm({ ...form, colaborador_id: id })} />
             </div>
             <div className="space-y-2">
               <label className={rotuloCampo}>Tipo</label>
@@ -217,15 +227,20 @@ export default function OcorrenciasPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className={rotuloCampo}>Primeiro dia</label>
-                <Input
-                  type="date" required value={form.data_inicio} className="h-12 rounded-xl"
-                  onChange={(e) => setForm({ ...form, data_inicio: e.target.value, data_fim: form.data_fim && form.data_fim >= e.target.value ? form.data_fim : e.target.value })}
-                />
+                <Input type="date" required value={form.data_inicio} className="h-12 rounded-xl" onChange={(e) => setForm({ ...form, data_inicio: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <label className={rotuloCampo}>Último dia</label>
-                <Input type="date" required min={form.data_inicio} value={form.data_fim} onChange={(e) => setForm({ ...form, data_fim: e.target.value })} className="h-12 rounded-xl" />
+                <label className={rotuloCampo}>Quantidade de dias</label>
+                <Input
+                  type="number" required min="1" step="1" inputMode="numeric" placeholder="Ex: 30" value={form.dias} className="h-12 rounded-xl"
+                  onChange={(e) => setForm({ ...form, dias: e.target.value })}
+                />
               </div>
+              {form.data_inicio && Number.isInteger(Number(form.dias)) && Number(form.dias) >= 1 && (
+                <p className="col-span-2 -mt-2 text-xs text-zinc-500">
+                  Dias corridos. Último dia: <strong className="text-zinc-800">{formatarData(somarDias(form.data_inicio, Number(form.dias) - 1))}</strong>
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <label className={rotuloCampo}>Observação (opcional)</label>

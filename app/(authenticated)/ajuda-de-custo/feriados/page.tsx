@@ -7,16 +7,29 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/supabase';
-import { expandirFeriados, feriadosNacionais, formatarData, diaSemana, DIAS_SEMANA, type FeriadoCadastrado } from '@/lib/ajuda-custo';
+import { expandirFeriados, feriadosNacionais, formatarData, diaSemana, DIAS_SEMANA, separarPraca, type FeriadoCadastrado } from '@/lib/ajuda-custo';
 import { rotuloCampo } from '@/components/ajuda-custo/colab-picker';
 
 interface Feriado extends FeriadoCadastrado {
   id: string;
 }
 
+// Feriados iguais (mesma data e descrição) cadastrados para várias praças de uma vez
+interface Grupo {
+  dataNoAno: string;
+  itens: Feriado[];
+}
+
 interface Praca {
   id: string;
   nome: string;
+}
+
+const SEM_UF = 'Outras';
+
+// A UF não é um campo da praça: vem do sufixo do nome ("Salvador/BA", "Salvador - BA").
+function ufDaPraca(nome: string): string {
+  return separarPraca(nome).uf ?? SEM_UF;
 }
 
 export default function FeriadosPage() {
@@ -27,7 +40,9 @@ export default function FeriadosPage() {
 
   const [data, setData] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [pracaId, setPracaId] = useState(''); // '' = todos os promotores
+  const [especificas, setEspecificas] = useState(false); // false = todos os promotores
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  const [busca, setBusca] = useState('');
   const [recorrente, setRecorrente] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
@@ -53,25 +68,37 @@ export default function FeriadosPage() {
 
   async function adicionar(e: React.FormEvent) {
     e.preventDefault();
+    const alvos: (string | null)[] = especificas ? [...selecionadas] : [null];
+    if (alvos.length === 0) return toast.error('Selecione ao menos uma praça.');
+    // a mesma data não pode repetir para o mesmo público (índice único data + praça)
+    const jaTem = new Set(cadastrados.filter((f) => f.data === data).map((f) => f.praca_id ?? ''));
+    const novos = alvos.filter((id) => !jaTem.has(id ?? ''));
+    const puladas = alvos.length - novos.length;
+    if (novos.length === 0) return toast.error('Essa data já está cadastrada para ' + (alvos.length > 1 ? 'todas as praças selecionadas.' : 'esse público.'));
     setSalvando(true);
     const { error } = await supabase
       .from('ajuda_custo_feriados')
-      .insert({ data, descricao: descricao.trim(), praca_id: pracaId || null, recorrente });
+      .insert(novos.map((praca_id) => ({ data, descricao: descricao.trim(), praca_id, recorrente })));
     setSalvando(false);
     if (error) return toast.error(error.code === '23505' ? 'Essa data já está cadastrada para esse público.' : 'Erro ao salvar: ' + error.message);
-    toast.success('Feriado cadastrado.');
+    toast.success(novos[0] === null ? 'Feriado cadastrado.' : `Feriado cadastrado em ${novos.length} praça${novos.length > 1 ? 's' : ''}.`);
+    if (puladas > 0) toast.warning(`${puladas} praça${puladas > 1 ? 's já tinham' : ' já tinha'} feriado nessa data e ${puladas > 1 ? 'foram puladas' : 'foi pulada'}.`);
     setData('');
     setDescricao('');
     setRecorrente(false);
+    setSelecionadas(new Set());
+    setBusca('');
     carregar();
   }
 
-  async function remover(f: Feriado) {
+  async function remover(g: Grupo) {
+    const f = g.itens[0];
+    const alvo = g.itens.length > 1 ? ` em ${g.itens.length} praças` : '';
     const aviso = f.recorrente
-      ? `"${f.descricao}" se repete todo ano. Remover apaga o feriado de todos os anos (a partir de ${f.data.slice(0, 4)}). Continuar?`
-      : `Remover o feriado "${f.descricao}" (${formatarData(f.data)})?`;
+      ? `"${f.descricao}"${alvo} se repete todo ano. Remover apaga o feriado de todos os anos (a partir de ${f.data.slice(0, 4)}). Continuar?`
+      : `Remover o feriado "${f.descricao}"${alvo} (${formatarData(f.data)})?`;
     if (!window.confirm(aviso)) return;
-    const { error } = await supabase.from('ajuda_custo_feriados').delete().eq('id', f.id);
+    const { error } = await supabase.from('ajuda_custo_feriados').delete().in('id', g.itens.map((x) => x.id));
     if (error) return toast.error('Erro ao excluir: ' + error.message);
     carregar();
   }
@@ -80,14 +107,49 @@ export default function FeriadosPage() {
   const nomePraca = useMemo(() => new Map(pracas.map((p) => [p.id, p.nome])), [pracas]);
 
   // feriados cadastrados que caem no ano exibido (considerando a recorrência)
-  const doAno = useMemo(
-    () =>
-      cadastrados
-        .map((f) => ({ f, dataNoAno: [...expandirFeriados([f], [ano]).keys()][0] }))
-        .filter((x) => x.dataNoAno)
-        .sort((a, b) => a.dataNoAno.localeCompare(b.dataNoAno)),
-    [cadastrados, ano]
-  );
+  const doAno = useMemo(() => {
+    const grupos = new Map<string, Grupo>();
+    cadastrados.forEach((f) => {
+      const dataNoAno = [...expandirFeriados([f], [ano]).keys()][0];
+      if (!dataNoAno) return;
+      const chave = `${dataNoAno}|${f.descricao}|${f.recorrente}`;
+      const g = grupos.get(chave);
+      if (g) g.itens.push(f);
+      else grupos.set(chave, { dataNoAno, itens: [f] });
+    });
+    return [...grupos.values()].sort((a, b) => a.dataNoAno.localeCompare(b.dataNoAno));
+  }, [cadastrados, ano]);
+
+  const ufs = useMemo(() => {
+    const cont = new Map<string, number>();
+    pracas.forEach((p) => {
+      const uf = ufDaPraca(p.nome);
+      cont.set(uf, (cont.get(uf) ?? 0) + 1);
+    });
+    return [...cont.entries()].sort(([a], [b]) => (a === SEM_UF ? 1 : b === SEM_UF ? -1 : a.localeCompare(b)));
+  }, [pracas]);
+
+  const visiveis = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    return pracas.filter((p) => !q || p.nome.toLowerCase().includes(q));
+  }, [pracas, busca]);
+
+  function alternar(ids: string[], marcar: boolean) {
+    setSelecionadas((atual) => {
+      const novo = new Set(atual);
+      ids.forEach((id) => (marcar ? novo.add(id) : novo.delete(id)));
+      return novo;
+    });
+  }
+
+  function descreverPracas(itens: Feriado[]) {
+    if (!itens[0].praca_id) return 'Todos os promotores';
+    if (itens.length === 1) return nomePraca.get(itens[0].praca_id) ?? 'Praça';
+    const grupoUfs = new Set(itens.map((i) => ufDaPraca(nomePraca.get(i.praca_id ?? '') ?? '')));
+    return `${grupoUfs.size === 1 ? [...grupoUfs][0] + ' · ' : ''}${itens.length} praças`;
+  }
+
+  const filtrando = busca.trim() !== '';
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -117,7 +179,7 @@ export default function FeriadosPage() {
         <CardHeader className="py-4 px-6 border-b border-zinc-100 space-y-0">
           <h2 className="text-sm font-black uppercase tracking-tight text-zinc-900">Feriados adicionais</h2>
           <p className="text-[11px] text-zinc-500 mt-1">
-            Para todos os promotores ou só para uma praça (cidade/estado). Feriado de um promotor específico: Ocorrências &gt; Feriado local.
+            Para todos os promotores ou só para algumas praças (cidades/estados). Feriado de um promotor específico: Ocorrências &gt; Feriado local.
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -128,11 +190,55 @@ export default function FeriadosPage() {
             </div>
             <div className="space-y-1">
               <label className={rotuloCampo}>Vale para</label>
-              <select value={pracaId} onChange={(e) => setPracaId(e.target.value)} className="h-11 w-full rounded-xl border border-input bg-white px-3 text-sm">
-                <option value="">Todos os promotores</option>
-                {pracas.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+              <select value={especificas ? 'pracas' : 'todos'} onChange={(e) => setEspecificas(e.target.value === 'pracas')} className="h-11 w-full rounded-xl border border-input bg-white px-3 text-sm">
+                <option value="todos">Todos os promotores</option>
+                <option value="pracas">Praças específicas</option>
               </select>
             </div>
+            {especificas && (
+              <div className="sm:col-span-2 space-y-2 rounded-xl border border-zinc-200 bg-white p-3">
+                <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar praça ou UF (ex: SP, Campinas)..." className="h-10 rounded-lg" />
+                <div className="flex flex-wrap gap-1.5">
+                  {ufs.map(([uf, qtd]) => {
+                    const ids = pracas.filter((p) => ufDaPraca(p.nome) === uf).map((p) => p.id);
+                    const todas = ids.every((id) => selecionadas.has(id));
+                    return (
+                      <button
+                        key={uf}
+                        type="button"
+                        onClick={() => alternar(ids, !todas)}
+                        className={`text-[11px] font-black uppercase tracking-wider rounded-full border px-2.5 py-1 ${todas ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50'}`}
+                      >
+                        {uf} ({qtd})
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                  <span>{selecionadas.size} de {pracas.length} selecionada{selecionadas.size === 1 ? '' : 's'}</span>
+                  <span className="flex gap-3">
+                    <button type="button" className="font-bold text-emerald-700 hover:underline" onClick={() => alternar(visiveis.map((p) => p.id), true)}>
+                      Marcar {filtrando ? 'filtradas' : 'todas'}
+                    </button>
+                    <button type="button" className="font-bold text-zinc-600 hover:underline" onClick={() => alternar(filtrando ? visiveis.map((p) => p.id) : [...selecionadas], false)}>
+                      Desmarcar {filtrando ? 'filtradas' : 'todas'}
+                    </button>
+                  </span>
+                </div>
+                <div className="max-h-48 overflow-y-auto divide-y divide-zinc-100 rounded-lg border border-zinc-100">
+                  {visiveis.length === 0 ? (
+                    <p className="px-3 py-4 text-center text-xs text-zinc-400">Nenhuma praça encontrada.</p>
+                  ) : (
+                    visiveis.map((p) => (
+                      <label key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-900 cursor-pointer hover:bg-zinc-50">
+                        <input type="checkbox" checked={selecionadas.has(p.id)} onChange={(e) => alternar([p.id], e.target.checked)} />
+                        {p.nome}
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
             <div className="space-y-1 sm:col-span-2">
               <label className={rotuloCampo}>Descrição</label>
               <Input required value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: Independência da Bahia" className="h-11 rounded-xl" />
@@ -144,7 +250,9 @@ export default function FeriadosPage() {
               </span>
             </label>
             <div className="sm:col-span-2 flex justify-end">
-              <Button type="submit" disabled={salvando} className="h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700"><Plus className="w-4 h-4 mr-1" /> Adicionar</Button>
+              <Button type="submit" disabled={salvando} className="h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700">
+                <Plus className="w-4 h-4 mr-1" /> {especificas && selecionadas.size > 0 ? `Adicionar em ${selecionadas.size} praça${selecionadas.size > 1 ? 's' : ''}` : 'Adicionar'}
+              </Button>
             </div>
           </form>
 
@@ -153,27 +261,37 @@ export default function FeriadosPage() {
             {doAno.length === 0 ? (
               <p className="px-6 py-8 text-center text-sm text-zinc-400">Nenhum feriado adicional em {ano}.</p>
             ) : (
-              doAno.map(({ f, dataNoAno }) => (
-                <div key={f.id} className="flex items-center justify-between gap-3 px-6 py-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-zinc-900">{f.descricao}</p>
-                    <p className="text-xs text-zinc-500 tabular-nums">
-                      {DIAS_SEMANA[diaSemana(dataNoAno)].slice(0, 3)} · {formatarData(dataNoAno)}
-                      <span className="mx-1">·</span>
-                      <span className="font-bold text-zinc-700">{f.praca_id ? nomePraca.get(f.praca_id) ?? 'Praça' : 'Todos os promotores'}</span>
-                      {f.praca_id && (membros.get(f.praca_id) ?? 0) === 0 && <span className="ml-1 text-amber-600 font-bold">(praça sem promotores)</span>}
-                    </p>
+              doAno.map((g) => {
+                const { dataNoAno, itens } = g;
+                const f = itens[0];
+                const semMembros = itens.filter((i) => i.praca_id && (membros.get(i.praca_id) ?? 0) === 0).length;
+                const nomes = itens.map((i) => nomePraca.get(i.praca_id ?? '') ?? '').filter(Boolean).sort().join(', ');
+                return (
+                  <div key={f.id} className="flex items-center justify-between gap-3 px-6 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-zinc-900">{f.descricao}</p>
+                      <p className="text-xs text-zinc-500 tabular-nums">
+                        {DIAS_SEMANA[diaSemana(dataNoAno)].slice(0, 3)} · {formatarData(dataNoAno)}
+                        <span className="mx-1">·</span>
+                        <span className="font-bold text-zinc-700" title={nomes || undefined}>{descreverPracas(itens)}</span>
+                        {semMembros > 0 && (
+                          <span className="ml-1 text-amber-600 font-bold">
+                            {itens.length === 1 ? '(praça sem promotores)' : `(${semMembros} sem promotores)`}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {f.recorrente && (
+                        <span title={`Repete todo ano desde ${f.data.slice(0, 4)}`} className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-1">
+                          <Repeat className="w-3 h-3" /> todo ano
+                        </span>
+                      )}
+                      <Button variant="ghost" size="icon" onClick={() => remover(g)}><Trash2 className="w-4 h-4 text-rose-500" /></Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {f.recorrente && (
-                      <span title={`Repete todo ano desde ${f.data.slice(0, 4)}`} className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-1">
-                        <Repeat className="w-3 h-3" /> todo ano
-                      </span>
-                    )}
-                    <Button variant="ghost" size="icon" onClick={() => remover(f)}><Trash2 className="w-4 h-4 text-rose-500" /></Button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </CardContent>

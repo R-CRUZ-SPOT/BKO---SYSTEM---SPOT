@@ -97,3 +97,32 @@ export function ColabPicker({
 }
 
 export const rotuloCampo = 'block text-[10px] font-black uppercase tracking-widest text-zinc-400';
+
+export interface ColaboradorCompleto extends ColaboradorOpcao {
+  status: string | null;
+}
+
+/** Nome, matrícula e status de colaboradores por id, de qualquer status (inclusive inativos). */
+export function useColaboradoresPorIds(ids: string[]): Map<string, ColaboradorCompleto> {
+  const [mapa, setMapa] = useState<Map<string, ColaboradorCompleto>>(new Map());
+  const chave = ids.slice().sort().join(',');
+
+  useEffect(() => {
+    if (!chave) return;
+    let vivo = true;
+    (async () => {
+      const lista = chave.split(',');
+      const saida = new Map<string, ColaboradorCompleto>();
+      for (let i = 0; i < lista.length; i += 100) {
+        const { data } = await supabase.from('colaboradores').select('id, nome, matricula, cargo, status').in('id', lista.slice(i, i + 100));
+        (data ?? []).forEach((c: any) => saida.set(c.id, c as ColaboradorCompleto));
+      }
+      if (vivo) setMapa(saida);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [chave]);
+
+  return mapa;
+}
