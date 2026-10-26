@@ -11,6 +11,7 @@ import {
   descontosPorMotivo,
   diasOcorrenciaPorMes,
   porPraca,
+  porSupervisor,
   rankingPromotores,
   resumirPorMes,
   variacao,
@@ -58,6 +59,7 @@ export default function DashboardPage() {
       anterior,
       motivos: descontosPorMotivo(dados.itens),
       pracas: porPraca(dados.itens, ultima.competencia),
+      supervisores: porSupervisor(dados.itens, ultima.competencia),
       ausencias: diasOcorrenciaPorMes(dados.ocorrencias, dados.competencias),
       ranking: rankingPromotores(dados.itens),
       comSaldo: itensUltimo.filter((i) => i.saldo_devedor > 0).length,
@@ -111,6 +113,13 @@ export default function DashboardPage() {
   const { ultima, anterior } = analise;
   const varPago = variacao(ultima.pago, anterior?.pago);
   const mesUlt = nomeCompetencia(ultima.competencia);
+  const linhasSupervisor = analise.supervisores.map((s) => ({
+    rotulo: s.supervisor,
+    valor: s.pago,
+    detalhe: `${s.promotores} ${s.promotores === 1 ? 'promotor' : 'promotores'} · média ${moeda(s.promotores ? s.pago / s.promotores : 0)}`,
+    cor: s.supervisor === 'Sem supervisor' ? COR.neutro : undefined,
+  }));
+  const metadeSupervisor = Math.ceil(linhasSupervisor.length / 2);
 
   return (
     <div className="space-y-6">
@@ -176,6 +185,15 @@ export default function DashboardPage() {
           <BarrasEmpilhadas meses={analise.ausencias} />
         </CartaoGrafico>
       </div>
+
+      {linhasSupervisor.some((l) => l.rotulo !== 'Sem supervisor') && (
+        <CartaoGrafico titulo="Valor lançado por supervisor" subtitulo={mesUlt}>
+          <div className="grid grid-cols-1 gap-x-10 gap-y-3 md:grid-cols-2">
+            <BarrasHorizontais cor={COR.azul} vazio="Sem dados." linhas={linhasSupervisor.slice(0, metadeSupervisor)} />
+            <BarrasHorizontais cor={COR.azul} vazio="" linhas={linhasSupervisor.slice(metadeSupervisor)} />
+          </div>
+        </CartaoGrafico>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <AfastadosHoje afastados={afastados} nomes={dados.nomes} />

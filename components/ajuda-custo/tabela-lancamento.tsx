@@ -17,6 +17,8 @@ export interface LinhaLancamento {
   matricula: string;
   /** tipo de contratação (EMPRESA); TMP = temporário */
   empresa: string | null;
+  /** supervisor do promotor */
+  supervisor: string | null;
   dias: number;
   uteis: number;
   descontados: number;
@@ -48,6 +50,7 @@ export function linhaDeResultado(r: ResultadoColaborador, av?: Avulso): LinhaLan
     nome: r.colaborador.nome,
     matricula: r.colaborador.matricula ?? '',
     empresa: r.colaborador.empresa ?? null,
+    supervisor: r.colaborador.supervisor ?? null,
     dias: r.diasTrabalhados,
     uteis: r.dias.filter((d) => !d.motivo?.startsWith('Feriado')).length,
     descontados: r.descontos.length,
@@ -79,6 +82,7 @@ export function linhaDeItemSalvo(item: any): LinhaLancamento {
     nome: item.colaboradores?.nome ?? '—',
     matricula: item.colaboradores?.matricula ?? '',
     empresa: null, // preenchida depois (carregarEmpresas)
+    supervisor: null, // preenchido depois (carregarSupervisores)
     dias: item.dias_trabalhados,
     uteis: item.dias_trabalhados + (det.dias_excluidos ?? []).filter((d: any) => !String(d.motivo ?? '').startsWith('Feriado')).length,
     descontados: (det.descontos ?? []).length,
@@ -103,6 +107,7 @@ export function linhaDeItemSalvo(item: any): LinhaLancamento {
 
 const TH = 'text-[10px] font-bold uppercase tracking-wide text-zinc-500';
 const SEM_EMPRESA = '__sem__';
+const SEM_SUP = '__sem_sup__';
 
 /** Número com 2 casas, sem o "R$" (a tabela é toda em reais; economiza largura). */
 const n2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -127,19 +132,23 @@ export function TabelaLancamento({
   const [abertos, setAbertos] = useState<Set<string>>(new Set());
   const [busca, setBusca] = useState('');
   const [contratacao, setContratacao] = useState(''); // '' = todas, SEM = sem informação, ou o valor de EMPRESA
+  const [supervisorSel, setSupervisorSel] = useState(''); // '' = todos, SEM_SUP = sem supervisor, ou o nome
 
   const empresasDisponiveis = useMemo(() => [...new Set(todas.map((l) => l.empresa?.trim()).filter((e): e is string => !!e))].sort(), [todas]);
   const temSemEmpresa = todas.some((l) => !l.empresa?.trim());
+  const supervisoresDisponiveis = useMemo(() => [...new Set(todas.map((l) => l.supervisor?.trim()).filter((s): s is string => !!s))].sort(), [todas]);
+  const temSemSupervisor = todas.some((l) => !l.supervisor?.trim());
 
   const linhas = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return todas.filter((l) => {
       if (q && !`${l.nome} ${l.matricula}`.toLowerCase().includes(q)) return false;
+      if (supervisorSel === SEM_SUP ? !!l.supervisor?.trim() : supervisorSel ? (l.supervisor?.trim() ?? '') !== supervisorSel : false) return false;
       if (contratacao === SEM_EMPRESA) return !l.empresa?.trim();
       if (contratacao) return (l.empresa?.trim() ?? '') === contratacao;
       return true;
     });
-  }, [todas, busca, contratacao]);
+  }, [todas, busca, contratacao, supervisorSel]);
   const filtrado = linhas.length !== todas.length;
 
   const totais = useMemo(
@@ -173,6 +182,7 @@ export function TabelaLancamento({
         Matrícula: l.matricula,
         Promotor: l.nome,
         Empresa: l.empresa ?? '',
+        Supervisor: l.supervisor ?? '',
         'Dias pagos': l.dias,
         Bruto: l.bruto,
         Descontos: l.descontos,
@@ -238,8 +248,20 @@ export function TabelaLancamento({
               {empresasDisponiveis.map((e) => <option key={e} value={e}>{e}{ehTemporario(e) ? ' (temporários)' : ''}</option>)}
               {temSemEmpresa && empresasDisponiveis.length > 0 && <option value={SEM_EMPRESA}>Sem informação</option>}
             </select>
+            {supervisoresDisponiveis.length > 0 && (
+              <select
+                value={supervisorSel}
+                onChange={(e) => setSupervisorSel(e.target.value)}
+                title="Supervisor do promotor"
+                className="h-9 max-w-[200px] rounded-xl border border-input bg-white px-3 text-xs"
+              >
+                <option value="">Todos os supervisores</option>
+                {supervisoresDisponiveis.map((s) => <option key={s} value={s}>{s}</option>)}
+                {temSemSupervisor && <option value={SEM_SUP}>Sem supervisor</option>}
+              </select>
+            )}
             {filtrado && (
-              <button type="button" onClick={() => { setBusca(''); setContratacao(''); }} className="text-[11px] font-bold text-emerald-700 hover:underline">Limpar filtros</button>
+              <button type="button" onClick={() => { setBusca(''); setContratacao(''); setSupervisorSel(''); }} className="text-[11px] font-bold text-emerald-700 hover:underline">Limpar filtros</button>
             )}
             <p className="text-xs text-zinc-500">
               {filtrado ? `${linhas.length} de ${todas.length}` : linhas.length} {todas.length === 1 && !filtrado ? 'promotor' : 'promotores'} · {nomeCompetencia(competencia)} · valores em R$
@@ -288,7 +310,7 @@ export function TabelaLancamento({
                         <TableCell className="pl-3 pr-0">{aberto ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronRight className="w-4 h-4 text-zinc-400" />}</TableCell>
                         <TableCell className="px-2 py-3 max-w-[190px] whitespace-normal">
                           <p className="text-sm font-bold text-zinc-900">{l.nome}</p>
-                          <p className="text-[10px] text-zinc-500">{tmp && <BadgeTmp className="ml-0 mr-1.5" />}MAT: {l.matricula}{l.empresa && !tmp ? ` · ${l.empresa}` : ''}</p>
+                          <p className="text-[10px] text-zinc-500">{tmp && <BadgeTmp className="ml-0 mr-1.5" />}MAT: {l.matricula}{l.empresa && !tmp ? ` · ${l.empresa}` : ''}{l.supervisor ? ' · SUP: ' + l.supervisor : ''}</p>
                         </TableCell>
                         <TableCell className="px-2 text-center text-sm tabular-nums text-zinc-500">{l.uteis}</TableCell>
                         <TableCell className="px-2 text-center text-sm tabular-nums font-bold">{l.dias}</TableCell>

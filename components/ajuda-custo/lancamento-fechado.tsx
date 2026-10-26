@@ -5,7 +5,7 @@ import { Lock, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
-import { buscarTudo, carregarEmpresas, reabrirLancamento } from '@/lib/ajuda-custo-data';
+import { buscarTudo, carregarEmpresas, carregarSupervisores, reabrirLancamento } from '@/lib/ajuda-custo-data';
 import { nomeCompetencia } from '@/lib/ajuda-custo';
 import { TabelaLancamento, linhaDeItemSalvo, type LinhaLancamento } from './tabela-lancamento';
 
@@ -43,8 +43,8 @@ export function LancamentoFechado({
             console.error(e);
           }
         }
-        const empresas = await carregarEmpresas();
-        setLinhas(itens.map(linhaDeItemSalvo).map((l) => ({ ...l, empresa: empresas.get(l.id) ?? null })).sort((a, b) => a.nome.localeCompare(b.nome)));
+        const [empresas, supervisores] = await Promise.all([carregarEmpresas(), carregarSupervisores()]);
+        setLinhas(itens.map(linhaDeItemSalvo).map((l) => ({ ...l, empresa: empresas.get(l.id) ?? null, supervisor: supervisores.get(l.id) ?? null })).sort((a, b) => a.nome.localeCompare(b.nome)));
       });
   }, [lancamento.id]);
 

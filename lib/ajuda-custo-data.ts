@@ -46,9 +46,23 @@ export async function buscarTudo<T>(montar: (from: number, to: number) => Promis
 
 /** colaborador -> empresa. Se a coluna ainda não existe no banco, devolve vazio (nada quebra). */
 export async function carregarEmpresas(): Promise<Map<string, string | null>> {
-  const { data, error } = await supabase.from('colaboradores').select('id, empresa').limit(10000);
-  if (error) return new Map();
-  return new Map((data ?? []).map((c: any) => [c.id as string, (c.empresa ?? null) as string | null]));
+  try {
+    // paginado: o Supabase devolve no máximo 1000 linhas por consulta
+    const linhas = await buscarTudo<any>((from, to) => supabase.from('colaboradores').select('id, empresa').order('id').range(from, to));
+    return new Map(linhas.map((c: any) => [c.id as string, (c.empresa ?? null) as string | null]));
+  } catch {
+    return new Map();
+  }
+}
+
+/** colaborador -> supervisor. Se as colunas ainda não existem no banco, devolve vazio (nada quebra). */
+export async function carregarSupervisores(): Promise<Map<string, string | null>> {
+  try {
+    const linhas = await buscarTudo<any>((from, to) => supabase.from('colaboradores').select('id, supervisor').order('id').range(from, to));
+    return new Map(linhas.map((c: any) => [c.id as string, (c.supervisor ?? null) as string | null]));
+  } catch {
+    return new Map();
+  }
 }
 
 export interface CarregamentoCalculo {
@@ -117,8 +131,8 @@ export async function carregarEntrada(competencia: string): Promise<Carregamento
       .eq('status', 'ativo')
       .order('nome');
     if (error) throw error;
-    const empresas = await carregarEmpresas();
-    colaboradores = (data ?? []).map((c: any) => ({ ...c, empresa: empresas.get(c.id) ?? null }));
+    const [empresas, supervisores] = await Promise.all([carregarEmpresas(), carregarSupervisores()]);
+    colaboradores = (data ?? []).map((c: any) => ({ ...c, empresa: empresas.get(c.id) ?? null, supervisor: supervisores.get(c.id) ?? null }));
   }
 
   const ocorrencias = await buscarTudo<any>((from, to) =>
@@ -329,6 +343,7 @@ async function carregarPreviaDashboard(): Promise<DadosDashboard> {
       nome: r.colaborador.nome,
       matricula: r.colaborador.matricula ?? '',
       praca: (pracaId && nomePraca.get(pracaId)) || null,
+      supervisor: r.colaborador.supervisor ?? null,
       bruto: r.bruto,
       descontos: r.totalDescontos,
       valor_pagar: valorTotalLancar(r.valorPagar, av),
@@ -410,6 +425,9 @@ export async function carregarDashboard(meses: number): Promise<DadosDashboard> 
     supabase.from('ajuda_custo_ocorrencias').select('colaborador_id, tipo, data_inicio, data_fim, colaboradores(nome)').gte('data_fim', inicio).range(from, to)
   );
   const nomes = new Map<string, string>(ocorrencias.map((o: any) => [o.colaborador_id as string, (o.colaboradores?.nome ?? '—') as string]));
+
+  const supervisores = await carregarSupervisores();
+  itens.forEach((i) => (i.supervisor = supervisores.get(i.colaborador_id) ?? null));
 
   return { itens, ocorrencias: ocorrencias as OcorrenciaDash[], competencias, nomes };
 }

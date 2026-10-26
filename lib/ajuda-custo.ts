@@ -51,6 +51,8 @@ export interface ColaboradorCalc {
   matricula?: string | null;
   /** tipo de contratação (coluna EMPRESA da planilha); TMP = temporário */
   empresa?: string | null;
+  /** supervisor do promotor (cadastro em Gestão de Pessoas / planilha de Roteiro) */
+  supervisor?: string | null;
 }
 
 /** Feriado cadastrado pelo usuário. praca_id nulo = vale para todos. recorrente = repete todo ano (a partir do ano de `data`). */

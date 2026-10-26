@@ -7,6 +7,7 @@ export interface ItemDash {
   nome: string;
   matricula: string;
   praca: string | null;
+  supervisor?: string | null;
   bruto: number;
   descontos: number;
   valor_pagar: number;
@@ -80,6 +81,18 @@ export function porPraca(itens: ItemDash[], competencia: string): { praca: strin
     mapa.set(chave, acc);
   }
   return [...mapa.entries()].map(([praca, v]) => ({ praca, ...v })).sort((a, b) => b.pago - a.pago);
+}
+
+export function porSupervisor(itens: ItemDash[], competencia: string): { supervisor: string; pago: number; promotores: number }[] {
+  const mapa = new Map<string, { pago: number; promotores: number }>();
+  for (const i of itens.filter((x) => x.competencia === competencia)) {
+    const chave = i.supervisor?.trim() || 'Sem supervisor';
+    const acc = mapa.get(chave) ?? { pago: 0, promotores: 0 };
+    acc.pago = r2(acc.pago + i.valor_pagar);
+    acc.promotores += 1;
+    mapa.set(chave, acc);
+  }
+  return [...mapa.entries()].map(([supervisor, v]) => ({ supervisor, ...v })).sort((a, b) => b.pago - a.pago);
 }
 
 export interface LinhaRanking {

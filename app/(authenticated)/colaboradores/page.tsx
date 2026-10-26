@@ -15,6 +15,8 @@ import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { dataCache } from '@/lib/data-cache';
+import { ImportarSupervisores } from '@/components/colaboradores/importar-supervisores';
+import { normalizarSupervisor } from '@/lib/supervisor-import';
 
 import { ImageCropperDialog } from '@/components/ui/image-cropper-dialog';
 import Image from 'next/image';
@@ -49,6 +51,8 @@ export default function ColaboradoresPage() {
   const [editEmail, setEditEmail] = useState('');
   const [editCargo, setEditCargo] = useState('');
   const [editJob, setEditJob] = useState('');
+  const [editSupervisor, setEditSupervisor] = useState('');
+  const [editSupSeguirPlanilha, setEditSupSeguirPlanilha] = useState(false);
   const [editDataNascimento, setEditDataNascimento] = useState('');
   const [editCpf, setEditCpf] = useState('');
   const [editRg, setEditRg] = useState('');
@@ -139,7 +143,7 @@ export default function ColaboradoresPage() {
     if (search) {
       const lowerSearch = search.toLowerCase();
       result = result.filter(item => {
-        const searchStr = `${item.nome || ''} ${item.matricula || ''} ${item.email || ''} ${item.cargo || ''} ${item.job || ''} ${item.status || ''} ${item.aparelhos?.map((a:any)=>`${a.modelo} ${a.imei}`).join(' ') || ''} ${item.linhas?.map((l:any)=>l.numero).join(' ') || ''}`.toLowerCase();
+        const searchStr = `${item.nome || ''} ${item.matricula || ''} ${item.email || ''} ${item.cargo || ''} ${item.job || ''} ${item.supervisor || ''} ${item.status || ''} ${item.aparelhos?.map((a:any)=>`${a.modelo} ${a.imei}`).join(' ') || ''} ${item.linhas?.map((l:any)=>l.numero).join(' ') || ''}`.toLowerCase();
         return searchStr.includes(lowerSearch);
       });
     }
@@ -695,6 +699,17 @@ export default function ColaboradoresPage() {
         fotoUrl = await uploadAvatar(editAvatarFile);
       }
 
+      // O supervisor só entra no update quando muda: assim a edição continua funcionando mesmo antes do SQL do supervisor.
+      // Editado aqui, passa a ser "manual" e não é sobrescrito por uma nova importação do Roteiro.
+      const supAntigo = normalizarSupervisor(editingColaborador.supervisor);
+      const supNovo = normalizarSupervisor(editSupervisor);
+      const supervisorExtra: Record<string, any> =
+        supNovo !== supAntigo
+          ? { supervisor: supNovo || null, supervisor_origem: supNovo ? 'manual' : null, supervisor_atualizado_em: new Date().toISOString() }
+          : editSupSeguirPlanilha && editingColaborador.supervisor_origem === 'manual'
+            ? { supervisor_origem: 'planilha' }
+            : {};
+
       const { error } = await supabase
         .from('colaboradores')
         .update({ 
@@ -708,7 +723,8 @@ export default function ColaboradoresPage() {
           rg: editRg || null,
           ctps: editCtps || null,
           serie_ctps: editSerieCtps || null,
-          foto_url: fotoUrl
+          foto_url: fotoUrl,
+          ...supervisorExtra
         })
         .eq('id', editingColaborador.id);
         
@@ -770,6 +786,8 @@ export default function ColaboradoresPage() {
     setEditEmail(colaborador.email || '');
     setEditCargo(colaborador.cargo || '');
     setEditJob(colaborador.job || '');
+    setEditSupervisor(colaborador.supervisor || '');
+    setEditSupSeguirPlanilha(false);
     setEditDataNascimento(colaborador.data_nascimento || '');
     setEditCpf(colaborador.cpf || '');
     setEditRg(colaborador.rg || '');
@@ -789,6 +807,7 @@ export default function ColaboradoresPage() {
         'Nome': colab.nome,
         'E-mail': colab.email || '',
         'Cargo': colab.cargo || '',
+        'Supervisor': colab.supervisor || '',
         'Job': colab.job || '',
         'Status': colab.status.toUpperCase(),
         'Aparelhos': colab.aparelhos?.map((a: any) => `${a.modelo} (${a.imei})`).join('; ') || '',
@@ -859,6 +878,7 @@ export default function ColaboradoresPage() {
             <Upload className="w-4 h-4 mr-2 text-zinc-500" />
             Importar
           </Button>
+          <ImportarSupervisores colaboradores={allData} onImportado={() => { dataCache.invalidate('colaboradores'); loadColaboradores(); }} />
           <Button variant="outline" className="rounded-xl border-zinc-200 hover:bg-zinc-50" onClick={handleDownloadTemplate}>
             <Download className="w-4 h-4 mr-2 text-zinc-500" />
             Modelo
@@ -1097,6 +1117,17 @@ export default function ColaboradoresPage() {
                   placeholder="Ex: TI" 
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Supervisor</label>
+              <Input value={editSupervisor} onChange={e => setEditSupervisor(e.target.value)} placeholder="Nome do supervisor" />
+              {editingColaborador?.supervisor_origem === 'manual' && normalizarSupervisor(editSupervisor) === normalizarSupervisor(editingColaborador?.supervisor) && (
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-zinc-600">
+                  <input type="checkbox" className="mt-0.5" checked={editSupSeguirPlanilha} onChange={e => setEditSupSeguirPlanilha(e.target.checked)} />
+                  <span>Alterado manualmente: não é sobrescrito pela planilha de Roteiro. Marque para voltar a seguir a planilha na próxima importação.</span>
+                </label>
+              )}
+              {editingColaborador?.supervisor_origem === 'planilha' && <p className="text-xs text-zinc-500">Veio da planilha de Roteiro. Se você editar, passa a valer o valor manual.</p>}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1402,6 +1433,7 @@ export default function ColaboradoresPage() {
                         <div className="flex flex-col">
                           <span className="text-sm text-zinc-700">{colab.cargo || '-'}</span>
                           <span className="text-[10px] font-bold uppercase tracking-tighter text-zinc-400">{colab.job || 'OUTROS'}</span>
+                          {colab.supervisor && <span className="text-[10px] text-zinc-500" title={colab.supervisor_origem === 'manual' ? 'Supervisor definido manualmente' : 'Supervisor da planilha de Roteiro'}>SUP: {colab.supervisor}</span>}
                         </div>
                       </TableCell>
                       <TableCell className="px-6 py-4">

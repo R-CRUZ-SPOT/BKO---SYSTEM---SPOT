@@ -34,6 +34,7 @@ interface Pendencia {
   nome: string;
   matricula: string;
   empresa: string | null;
+  supervisor: string | null;
   /** dias com acréscimo: pagos agora */
   dif: DiferencaDia[];
   total: number;
@@ -94,6 +95,7 @@ export default function ComplementosPage() {
           nome: c.nome,
           matricula: c.matricula ?? '',
           empresa: c.empresa ?? null,
+          supervisor: c.supervisor ?? null,
           dif,
           total: r2(dif.reduce((s, d) => s + d.diferenca, 0)),
           reducao,
@@ -258,7 +260,7 @@ export default function ComplementosPage() {
                         <TableCell className="pl-4">{aberto ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronRight className="w-4 h-4 text-zinc-400" />}</TableCell>
                         <TableCell className="py-3">
                           <p className="text-sm font-bold text-zinc-900">{p.nome}{ehTemporario(p.empresa) && <BadgeTmp />}</p>
-                          <p className="text-[10px] text-zinc-500">MAT: {p.matricula}</p>
+                          <p className="text-[10px] text-zinc-500">MAT: {p.matricula}{p.supervisor ? ' · SUP: ' + p.supervisor : ''}</p>
                         </TableCell>
                         <TableCell className="text-center text-xs tabular-nums">{p.dif.length}</TableCell>
                         <TableCell className={cn('text-right text-sm font-black tabular-nums', p.total < 0 ? 'text-rose-600' : 'text-emerald-700')}>{moeda(p.total)}</TableCell>
