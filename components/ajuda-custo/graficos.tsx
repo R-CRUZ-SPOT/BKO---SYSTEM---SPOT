@@ -16,6 +16,7 @@ export const COR = {
   aqua: '#1baf7a',
   magenta: '#e87ba4',
   neutro: '#a1a1aa',
+  grafite: '#52514e',
 };
 
 export const COR_TIPO: Record<TipoOcorrencia, string> = {
@@ -23,6 +24,7 @@ export const COR_TIPO: Record<TipoOcorrencia, string> = {
   atestado: COR.laranja,
   falta: COR.aqua,
   feriado_local: COR.magenta,
+  desligamento: COR.grafite,
 };
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -212,7 +214,7 @@ export function BarrasHorizontais({ linhas, cor, vazio }: { linhas: LinhaBarra[]
   );
 }
 
-const TIPOS: TipoOcorrencia[] = ['ferias', 'atestado', 'falta', 'feriado_local'];
+const TIPOS: TipoOcorrencia[] = ['ferias', 'atestado', 'falta', 'feriado_local', 'desligamento'];
 
 /** Dias de ausência por mês, empilhados por tipo de ocorrência. */
 export function BarrasEmpilhadas({ meses }: { meses: { competencia: string; porTipo: Record<TipoOcorrencia, number> }[] }) {

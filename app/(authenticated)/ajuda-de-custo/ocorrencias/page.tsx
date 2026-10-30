@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { supabase } from '@/lib/supabase';
 import { TIPO_LABEL, type TipoOcorrencia, formatarData, somarDias } from '@/lib/ajuda-custo';
+import { inativarDesligadosVigentes } from '@/lib/inativar-desligados';
 import { avisarAcertosMudaram } from '@/hooks/use-acertos-pendentes';
 import { ColabPicker, rotuloCampo, useColaboradoresAtivos, useColaboradoresPorIds } from '@/components/ajuda-custo/colab-picker';
 import { cn } from '@/lib/utils';
@@ -21,12 +22,14 @@ const COR: Record<TipoOcorrencia, string> = {
   atestado: 'bg-amber-50 text-amber-700 border-amber-100',
   falta: 'bg-rose-50 text-rose-700 border-rose-100',
   feriado_local: 'bg-purple-50 text-purple-700 border-purple-100',
+  desligamento: 'bg-zinc-800 text-white border-zinc-800',
 };
 
 const AJUDA: Record<TipoOcorrencia, string> = {
   ferias: 'Dias de férias não entram no cálculo. No retorno, só contam os dias trabalhados.',
   atestado: 'Dias já pagos no mês corrente são descontados; dias do mês seguinte não são pagos.',
   falta: 'Dia pago e não trabalhado: é descontado no próximo lançamento.',
+  desligamento: 'Promotor desligado: informe o primeiro e o último dia. Os dias do período não são pagos, e dias já pagos nele são descontados na folha seguinte.',
   feriado_local: 'Feriado de um promotor específico. Feriado de cidade/estado deve ser lançado em Feriados, por praça (vale para todos e pode repetir todo ano).',
 };
 
@@ -50,7 +53,7 @@ export default function OcorrenciasPage() {
 
   const [formAberto, setFormAberto] = useState(false);
   const [editando, setEditando] = useState<Ocorrencia | null>(null);
-  const [form, setForm] = useState({ colaborador_id: '', tipo: 'atestado' as TipoOcorrencia, data_inicio: '', dias: '', observacao: '' });
+  const [form, setForm] = useState({ colaborador_id: '', tipo: 'atestado' as TipoOcorrencia, data_inicio: '', dias: '', data_fim: '', observacao: '' });
   const [salvando, setSalvando] = useState(false);
 
   async function carregar() {
@@ -84,8 +87,8 @@ export default function OcorrenciasPage() {
     setEditando(o ?? null);
     setForm(
       o
-        ? { colaborador_id: o.colaborador_id, tipo: o.tipo, data_inicio: o.data_inicio, dias: String(contarDias(o.data_inicio, o.data_fim)), observacao: o.observacao ?? '' }
-        : { colaborador_id: '', tipo: filtro === 'todos' ? 'atestado' : filtro, data_inicio: '', dias: '', observacao: '' }
+        ? { colaborador_id: o.colaborador_id, tipo: o.tipo, data_inicio: o.data_inicio, dias: String(contarDias(o.data_inicio, o.data_fim)), data_fim: o.data_fim, observacao: o.observacao ?? '' }
+        : { colaborador_id: '', tipo: filtro === 'todos' ? 'atestado' : filtro, data_inicio: '', dias: '', data_fim: '', observacao: '' }
     );
     setFormAberto(true);
   }
@@ -93,16 +96,24 @@ export default function OcorrenciasPage() {
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     if (!form.colaborador_id) return toast.error('Selecione o promotor.');
-    const dias = Number(form.dias);
-    if (!Number.isInteger(dias) || dias < 1 || dias > 3650) return toast.error('Informe a quantidade de dias (número inteiro, a partir de 1).');
+    // Desligamento informa o primeiro e o último dia; os demais tipos, o primeiro dia e a quantidade de dias
+    const porPeriodo = form.tipo === 'desligamento';
+    let dataFim: string;
+    if (porPeriodo) {
+      if (!form.data_fim || form.data_fim < form.data_inicio) return toast.error('O último dia não pode ser anterior ao primeiro.');
+      dataFim = form.data_fim;
+    } else {
+      const dias = Number(form.dias);
+      if (!Number.isInteger(dias) || dias < 1 || dias > 3650) return toast.error('Informe a quantidade de dias (número inteiro, a partir de 1).');
+      dataFim = somarDias(form.data_inicio, dias - 1); // primeiro dia + quantidade de dias corridos - 1
+    }
 
     setSalvando(true);
-    // o último dia é calculado: primeiro dia + quantidade de dias corridos - 1
     const payload = {
       colaborador_id: form.colaborador_id,
       tipo: form.tipo,
       data_inicio: form.data_inicio,
-      data_fim: somarDias(form.data_inicio, dias - 1),
+      data_fim: dataFim,
       observacao: form.observacao.trim() || null,
     };
     const { error } = editando
@@ -111,6 +122,10 @@ export default function OcorrenciasPage() {
     setSalvando(false);
     if (error) return toast.error('Erro ao salvar: ' + error.message);
     toast.success('Ocorrência salva.');
+    if (payload.tipo === 'desligamento') {
+      const nomes = await inativarDesligadosVigentes();
+      if (nomes.length > 0) toast.info(`Promotor inativado automaticamente: ${nomes.join(', ')}`);
+    }
     setFormAberto(false);
     avisarAcertosMudaram();
     carregar();
@@ -229,7 +244,14 @@ export default function OcorrenciasPage() {
                 <label className={rotuloCampo}>Primeiro dia</label>
                 <Input type="date" required value={form.data_inicio} className="h-12 rounded-xl" onChange={(e) => setForm({ ...form, data_inicio: e.target.value })} />
               </div>
-              <div className="space-y-2">
+              {form.tipo === 'desligamento' ? (
+                <div className="space-y-2">
+                  <label className={rotuloCampo}>Último dia</label>
+                  <Input type="date" required min={form.data_inicio || undefined} value={form.data_fim} className="h-12 rounded-xl" onChange={(e) => setForm({ ...form, data_fim: e.target.value })} />
+                </div>
+              ) : (
+                <>
+                <div className="space-y-2">
                 <label className={rotuloCampo}>Quantidade de dias</label>
                 <Input
                   type="number" required min="1" step="1" inputMode="numeric" placeholder="Ex: 30" value={form.dias} className="h-12 rounded-xl"
@@ -240,6 +262,8 @@ export default function OcorrenciasPage() {
                 <p className="col-span-2 -mt-2 text-xs text-zinc-500">
                   Dias corridos. Último dia: <strong className="text-zinc-800">{formatarData(somarDias(form.data_inicio, Number(form.dias) - 1))}</strong>
                 </p>
+              )}
+                </>
               )}
             </div>
             <div className="space-y-2">

@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { BadgeTmp } from './badge-tmp';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { type Avulso, DIAS_SEMANA, ehTemporario, type ResultadoColaborador, diaSemana, formatarData, moeda, nomeCompetencia, r2, saldoDevedorFinal, valorTotalLancar } from '@/lib/ajuda-custo';
+import { type Avulso, DIAS_SEMANA, ehCltOuMkt, ehTemporario, type ResultadoColaborador, diaSemana, formatarData, moeda, nomeCompetencia, r2, saldoDevedorFinal, valorTotalLancar } from '@/lib/ajuda-custo';
 import { cn } from '@/lib/utils';
 
 export interface LinhaLancamento {
@@ -42,6 +42,8 @@ export interface LinhaLancamento {
   pagos: { data: string; valor: number }[];
   excluidos: { data: string; valor: number; motivo?: string }[];
   listaDescontos: { data: string; valor: number; motivo: string; estimado?: boolean }[];
+  /** ISO de quando o pagamento foi incluído depois do fechamento do mês (promotor que entrou após o fechamento) */
+  pagoApos: string | null;
 }
 
 export function linhaDeResultado(r: ResultadoColaborador, av?: Avulso): LinhaLancamento {
@@ -70,6 +72,7 @@ export function linhaDeResultado(r: ResultadoColaborador, av?: Avulso): LinhaLan
     pagos: r.diasPagos.map((d) => ({ data: d.data, valor: d.valor })),
     excluidos: r.dias.filter((d) => !d.pago).map((d) => ({ data: d.data, valor: d.valor, motivo: d.motivo })),
     listaDescontos: r.descontos,
+    pagoApos: null,
   };
 }
 
@@ -102,6 +105,7 @@ export function linhaDeItemSalvo(item: any): LinhaLancamento {
     pagos: det.dias_pagos ?? [],
     excluidos: det.dias_excluidos ?? [],
     listaDescontos: det.descontos ?? [],
+    pagoApos: det.pago_apos_fechamento?.em ?? null,
   };
 }
 
@@ -158,6 +162,8 @@ export function TabelaLancamento({
       descontos: linhas.reduce((s, l) => s + l.descontos, 0),
       saldo: linhas.reduce((s, l) => s + l.saldoDevedor, 0),
       alimentacao: linhas.reduce((s, l) => s + l.alimentacao, 0),
+      tmp: linhas.filter((l) => ehTemporario(l.empresa)).reduce((s, l) => s + l.valorPagar, 0),
+      clt: linhas.filter((l) => ehCltOuMkt(l.empresa)).reduce((s, l) => s + l.valorPagar, 0),
     }),
     [linhas]
   );
@@ -196,6 +202,7 @@ export function TabelaLancamento({
         'Alimentação (lançamento à parte)': l.alimentacao,
         'Saldo devedor p/ próximo mês': l.saldoDevedor,
         Observação: l.observacaoAvulso ?? '',
+        'Pago após o fechamento': l.pagoApos ? formatarData(l.pagoApos.slice(0, 10)) : '',
       }));
       const descontos = linhas.flatMap((l) =>
         l.listaDescontos.map((d) => ({ Matrícula: l.matricula, Promotor: l.nome, Data: formatarData(d.data), Valor: d.valor, Motivo: d.motivo }))
@@ -215,12 +222,13 @@ export function TabelaLancamento({
     { rotulo: 'Bruto', valor: moeda(totais.bruto) },
     { rotulo: 'Descontos', valor: moeda(totais.descontos) },
     { rotulo: 'Saldo devedor', valor: moeda(totais.saldo) },
+    ...(mostrarParcelas || totais.clt > 0 ? [{ rotulo: 'CLT + MKT (a lançar)', valor: moeda(totais.clt) }, { rotulo: 'TMP (a lançar)', valor: moeda(totais.tmp) }] : []),
     ...(totais.alimentacao > 0 ? [{ rotulo: 'Alimentação (à parte)', valor: moeda(totais.alimentacao) }] : []),
   ];
 
   return (
     <div className="space-y-4">
-      <div className={cn('grid grid-cols-2 gap-4', resumoCards.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4')}>
+      <div className={cn('grid grid-cols-2 gap-4', resumoCards.length > 6 ? 'lg:grid-cols-4' : resumoCards.length > 4 ? 'lg:grid-cols-6' : 'lg:grid-cols-4')}>
         {resumoCards.map((c) => (
           <Card key={c.rotulo} className={cn('border-zinc-100 shadow-sm', c.destaque ? 'bg-emerald-600 text-white' : 'bg-white/50')}>
             <CardContent className="p-5">
@@ -310,6 +318,9 @@ export function TabelaLancamento({
                         <TableCell className="pl-3 pr-0">{aberto ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronRight className="w-4 h-4 text-zinc-400" />}</TableCell>
                         <TableCell className="px-2 py-3 max-w-[190px] whitespace-normal">
                           <p className="text-sm font-bold text-zinc-900">{l.nome}</p>
+                          {l.pagoApos && (
+                            <p className="mt-0.5 inline-block rounded-md bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">Pago após o fechamento · {formatarData(l.pagoApos.slice(0, 10))}</p>
+                          )}
                           <p className="text-[10px] text-zinc-500">{tmp && <BadgeTmp className="ml-0 mr-1.5" />}MAT: {l.matricula}{l.empresa && !tmp ? ` · ${l.empresa}` : ''}{l.supervisor ? ' · SUP: ' + l.supervisor : ''}</p>
                         </TableCell>
                         <TableCell className="px-2 text-center text-sm tabular-nums text-zinc-500">{l.uteis}</TableCell>

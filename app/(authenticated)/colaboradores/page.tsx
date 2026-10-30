@@ -37,8 +37,7 @@ export default function ColaboradoresPage() {
   const [newDataNascimento, setNewDataNascimento] = useState('');
   const [newCpf, setNewCpf] = useState('');
   const [newRg, setNewRg] = useState('');
-  const [newCtps, setNewCtps] = useState('');
-  const [newSerieCtps, setNewSerieCtps] = useState('');
+  const [newEmpresa, setNewEmpresa] = useState('');
   const [newAvatarFile, setNewAvatarFile] = useState<File | null>(null);
   const [newAvatarPreview, setNewAvatarPreview] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -56,6 +55,7 @@ export default function ColaboradoresPage() {
   const [editDataNascimento, setEditDataNascimento] = useState('');
   const [editCpf, setEditCpf] = useState('');
   const [editRg, setEditRg] = useState('');
+  const [editEmpresa, setEditEmpresa] = useState('');
   const [editCtps, setEditCtps] = useState('');
   const [editSerieCtps, setEditSerieCtps] = useState('');
   const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
@@ -648,8 +648,7 @@ export default function ColaboradoresPage() {
            data_nascimento: newDataNascimento || null,
            cpf: newCpf || null,
            rg: newRg || null,
-           ctps: newCtps || null,
-           serie_ctps: newSerieCtps || null,
+           empresa: newEmpresa.trim() || null,
            foto_url: fotoUrl
         }]);
         
@@ -670,8 +669,7 @@ export default function ColaboradoresPage() {
       setNewDataNascimento('');
       setNewCpf('');
       setNewRg('');
-      setNewCtps('');
-      setNewSerieCtps('');
+      setNewEmpresa('');
       setNewAvatarFile(null);
       setNewAvatarPreview(null);
       dataCache.invalidate('colaboradores');
@@ -721,6 +719,7 @@ export default function ColaboradoresPage() {
           data_nascimento: editDataNascimento || null,
           cpf: editCpf || null,
           rg: editRg || null,
+          empresa: editEmpresa.trim() || null,
           ctps: editCtps || null,
           serie_ctps: editSerieCtps || null,
           foto_url: fotoUrl,
@@ -791,6 +790,7 @@ export default function ColaboradoresPage() {
     setEditDataNascimento(colaborador.data_nascimento || '');
     setEditCpf(colaborador.cpf || '');
     setEditRg(colaborador.rg || '');
+    setEditEmpresa(colaborador.empresa || '');
     setEditCtps(colaborador.ctps || '');
     setEditSerieCtps(colaborador.serie_ctps || '');
     setEditAvatarFile(null);
@@ -1006,23 +1006,19 @@ export default function ColaboradoresPage() {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">CTPS (Número)</label>
-                <Input 
-                  value={newCtps} 
-                  onChange={e => setNewCtps(e.target.value)} 
-                  placeholder="Ex: 1234567"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">CTPS (Série)</label>
-                <Input 
-                  value={newSerieCtps} 
-                  onChange={e => setNewSerieCtps(e.target.value)} 
-                  placeholder="Ex: 001-SP"
-                />
-              </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Empresa (tipo de contratação)</label>
+              <Input
+                list="empresas-sugestoes"
+                value={newEmpresa}
+                onChange={e => setNewEmpresa(e.target.value)}
+                placeholder="Ex: CLT, TMP, MKT"
+              />
+              <datalist id="empresas-sugestoes">
+                <option value="CLT" />
+                <option value="TMP" />
+                <option value="MKT" />
+              </datalist>
             </div>
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -1157,6 +1153,21 @@ export default function ColaboradoresPage() {
                   placeholder="Ex: 00.000.000-0"
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Empresa (tipo de contratação)</label>
+              <Input
+                list="empresas-sugestoes-edit"
+                value={editEmpresa}
+                onChange={e => setEditEmpresa(e.target.value)}
+                placeholder="Ex: CLT, TMP, MKT"
+              />
+              <datalist id="empresas-sugestoes-edit">
+                <option value="CLT" />
+                <option value="TMP" />
+                <option value="MKT" />
+              </datalist>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

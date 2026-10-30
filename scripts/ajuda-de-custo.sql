@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS public.ajuda_custo_valores (
 CREATE TABLE IF NOT EXISTS public.ajuda_custo_ocorrencias (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   colaborador_id UUID NOT NULL REFERENCES public.colaboradores(id) ON DELETE CASCADE,
-  tipo TEXT NOT NULL CHECK (tipo IN ('ferias', 'atestado', 'falta', 'feriado_local')),
+  tipo TEXT NOT NULL CHECK (tipo IN ('ferias', 'atestado', 'falta', 'feriado_local', 'desligamento')),
   data_inicio DATE NOT NULL,
   data_fim DATE NOT NULL,
   observacao TEXT,

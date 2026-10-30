@@ -11,13 +11,14 @@
 // Este arquivo é puro (sem React/Supabase) para poder ser testado isoladamente.
 // Datas sempre como string 'YYYY-MM-DD' e competências como 'YYYY-MM'.
 
-export type TipoOcorrencia = 'ferias' | 'atestado' | 'falta' | 'feriado_local';
+export type TipoOcorrencia = 'ferias' | 'atestado' | 'falta' | 'feriado_local' | 'desligamento';
 
 export const TIPO_LABEL: Record<TipoOcorrencia, string> = {
   ferias: 'Férias',
   atestado: 'Atestado',
   falta: 'Falta',
   feriado_local: 'Feriado local',
+  desligamento: 'Desligamento',
 };
 
 export const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -200,6 +201,9 @@ export interface ResultadoColaborador {
 /** Promotor temporário: EMPRESA = TMP. */
 export const ehTemporario = (empresa?: string | null) => /^\s*TMP\b/i.test(empresa ?? '');
 
+/** Contratação CLT ou MKT (coluna EMPRESA). */
+export const ehCltOuMkt = (empresa?: string | null) => /^s*(CLT|MKT)/i.test(empresa ?? '');
+
 export const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 const toDate = (iso: string) => {
@@ -337,8 +341,8 @@ function tarifaVigente(tarifas: Tarifa[], data: string): Tarifa | undefined {
 }
 
 function ocorrenciaNoDia(ocorrencias: Ocorrencia[], data: string): Ocorrencia | undefined {
-  // Prioridade: férias > atestado > falta > feriado local
-  const prioridade: TipoOcorrencia[] = ['ferias', 'atestado', 'falta', 'feriado_local'];
+  // Prioridade: desligamento > férias > atestado > falta > feriado local
+  const prioridade: TipoOcorrencia[] = ['desligamento', 'ferias', 'atestado', 'falta', 'feriado_local'];
   const doDia = ocorrencias.filter((o) => o.data_inicio <= data && data <= o.data_fim);
   for (const tipo of prioridade) {
     const achada = doDia.find((o) => o.tipo === tipo);
@@ -461,6 +465,31 @@ export function calcularColaborador(
     valorPagar: Math.max(0, liquido),
     saldoDevedor: Math.max(0, r2(-liquido)),
   };
+}
+
+/**
+ * Dias já pagos (de um lançamento fechado) que, com as ocorrências e feriados conhecidos hoje, não deveriam ter
+ * sido pagos: é o desconto que entra na folha seguinte. Agrupado por colaborador, em ordem de data.
+ * Não depende de o colaborador estar ativo nem de ter folha seguinte (ex.: desligados).
+ */
+export function descontosPosFechamento(entrada: EntradaCalculo, diasPagos: DiaPago[]): Map<string, Desconto[]> {
+  const resultado = new Map<string, Desconto[]>();
+  const feriadosPorColab = new Map<string, Map<string, string>>();
+  for (const pago of diasPagos) {
+    let feriados = feriadosPorColab.get(pago.colaborador_id);
+    if (!feriados) {
+      feriados = feriadosDoColaborador(pago.colaborador_id, entrada);
+      feriadosPorColab.set(pago.colaborador_id, feriados);
+    }
+    const ocorrencias = entrada.ocorrencias.filter((o) => o.colaborador_id === pago.colaborador_id);
+    const motivo = motivoDeExclusao(pago.data, ocorrencias, feriados);
+    if (!motivo) continue;
+    const lista = resultado.get(pago.colaborador_id) ?? [];
+    lista.push({ data: pago.data, valor: valorEfetivo(entrada, pago.colaborador_id, pago.data, pago.valor), motivo, estimado: false, diaPagoId: pago.id });
+    resultado.set(pago.colaborador_id, lista);
+  }
+  resultado.forEach((lista) => lista.sort((a, b) => a.data.localeCompare(b.data)));
+  return resultado;
 }
 
 export interface DiferencaDia {

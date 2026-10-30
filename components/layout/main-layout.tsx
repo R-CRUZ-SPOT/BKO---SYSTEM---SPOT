@@ -11,6 +11,8 @@ import { motion, AnimatePresence } from 'motion/react';
 
 import { supabase } from '@/lib/supabase';
 import { useAcertosPendentes } from '@/hooks/use-acertos-pendentes';
+import { inativarDesligadosVigentes } from '@/lib/inativar-desligados';
+import { toast } from 'sonner';
 
 interface SidebarContentProps {
   navItems: { name: string; href: string; icon: any; badge?: number }[];
@@ -83,6 +85,9 @@ const SidebarContent = ({ navItems, user, profile, signOut, onItemClick }: Sideb
   </div>
 );
 
+// a verificação roda uma vez por carregamento do sistema
+let desligadosVerificados = false;
+
 export function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, signOut } = useAuth();
   const router = useRouter();
@@ -96,6 +101,12 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     }
     
     if (user) {
+      if (!desligadosVerificados) {
+        desligadosVerificados = true;
+        inativarDesligadosVigentes().then((nomes) => {
+          if (nomes.length > 0) toast.info(`${nomes.length} promotor(es) inativado(s) por desligamento: ${nomes.join(', ')}`);
+        });
+      }
       loadBirthdayCount();
     }
     

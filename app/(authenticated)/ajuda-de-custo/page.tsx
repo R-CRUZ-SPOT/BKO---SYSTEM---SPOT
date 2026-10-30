@@ -152,7 +152,7 @@ export default function CalculoPage() {
     if (
       jaIniciado &&
       !window.confirm(
-        `Atenção: ${nomeCompetencia(competencia)} já começou.\n\nSe este mês já foi pago, NÃO feche: o fechamento registraria como pagos só os dias deste cálculo, e os descontos de atestado, falta ou férias cadastrados hoje deixariam de ser feitos na folha seguinte.\n\nFechar mesmo assim?`
+        `Atenção: ${nomeCompetencia(competencia)} já começou.\n\nFeche só se o A lançar desta tela for IGUAL ao que foi pago (a folha saiu deste sistema e nada mudou depois). O fechamento grava como pagos os dias deste cálculo: se houver desligamento, atestado, falta ou férias cadastrados depois do pagamento, esses dias deixariam de ser descontados.\n\nSe o pagamento foi feito por fora do sistema ou com valores diferentes, NÃO feche.\n\nFechar mesmo assim?`
       )
     ) {
       return;
@@ -204,7 +204,8 @@ export default function CalculoPage() {
               <p>
                 <strong>{nomeCompetencia(competencia)} já começou.</strong> Se este mês já foi pago, esta tela é só uma <strong>simulação com as informações de hoje</strong>: os dias com atestado, falta ou
                 férias cadastrados agora aparecem aqui como &quot;não pagos&quot;, mas na prática já foram pagos e serão <strong>descontados na folha de {nomeCompetencia(somarMeses(competencia, 1))}</strong>.
-                Não feche este mês se ele já foi pago.
+                Se a folha foi paga com o valor <strong>exportado deste sistema</strong> e o A lançar abaixo ainda é igual ao pago, <strong>feche agora</strong>: o fechamento registra o que foi pago e os descontos
+                futuros (ex.: desligamento) passam a aparecer no painel do mês fechado. Se o pagamento foi feito por fora ou os valores mudaram, não feche.
               </p>
             </div>
           )}

@@ -8,6 +8,8 @@ import { supabase } from '@/lib/supabase';
 import { buscarTudo, carregarEmpresas, carregarSupervisores, reabrirLancamento } from '@/lib/ajuda-custo-data';
 import { nomeCompetencia } from '@/lib/ajuda-custo';
 import { TabelaLancamento, linhaDeItemSalvo, type LinhaLancamento } from './tabela-lancamento';
+import { DescontosPendentes } from './descontos-pendentes';
+import { PendentesPosFechamento } from './pendentes-pos-fechamento';
 
 export function LancamentoFechado({
   lancamento,
@@ -19,6 +21,7 @@ export function LancamentoFechado({
   onReaberto: () => void;
 }) {
   const [linhas, setLinhas] = useState<LinhaLancamento[] | null>(null);
+  const [versao, setVersao] = useState(0);
 
   useEffect(() => {
     supabase
@@ -46,7 +49,7 @@ export function LancamentoFechado({
         const [empresas, supervisores] = await Promise.all([carregarEmpresas(), carregarSupervisores()]);
         setLinhas(itens.map(linhaDeItemSalvo).map((l) => ({ ...l, empresa: empresas.get(l.id) ?? null, supervisor: supervisores.get(l.id) ?? null })).sort((a, b) => a.nome.localeCompare(b.nome)));
       });
-  }, [lancamento.id]);
+  }, [lancamento.id, versao]);
 
   async function reabrir() {
     const ok = window.confirm(
@@ -78,6 +81,8 @@ export function LancamentoFechado({
           </Button>
         )}
       </div>
+      {podeReabrir && <PendentesPosFechamento competencia={lancamento.competencia} lancamentoId={lancamento.id} onRegistrado={() => setVersao((v) => v + 1)} />}
+      <DescontosPendentes competencia={lancamento.competencia} lancamentoId={lancamento.id} />
       {linhas === null ? (
         <p className="text-center py-16 text-zinc-400 text-sm">Carregando...</p>
       ) : (

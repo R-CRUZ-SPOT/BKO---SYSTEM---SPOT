@@ -126,7 +126,7 @@ export function diasOcorrenciaPorMes(ocorrencias: OcorrenciaDash[], competencias
     const dias = diasDoMes(competencia);
     const primeiro = dias[0];
     const ultimo = dias[dias.length - 1];
-    const porTipo: Record<TipoOcorrencia, number> = { ferias: 0, atestado: 0, falta: 0, feriado_local: 0 };
+    const porTipo: Record<TipoOcorrencia, number> = { ferias: 0, atestado: 0, falta: 0, feriado_local: 0, desligamento: 0 };
     for (const o of ocorrencias) {
       const ini = o.data_inicio > primeiro ? o.data_inicio : primeiro;
       const fim = o.data_fim < ultimo ? o.data_fim : ultimo;

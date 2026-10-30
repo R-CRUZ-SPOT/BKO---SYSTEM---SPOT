@@ -12,9 +12,12 @@ import {
   type FeriadoCadastrado,
   expandirFeriados,
   calcularCompetencia,
+  calcularColaborador,
   valorTotalLancar,
   saldoDevedorFinal,
   competenciaPadrao,
+  descontosPosFechamento,
+  type Desconto,
   feriadosNacionaisEntre,
   somarMeses,
 } from '@/lib/ajuda-custo';
@@ -218,6 +221,140 @@ export async function carregarEntrada(competencia: string): Promise<Carregamento
   };
 }
 
+export interface DescontoPendente {
+  colaborador_id: string;
+  nome: string;
+  matricula: string;
+  empresa: string | null;
+  supervisor: string | null;
+  inativo: boolean;
+  /** tem dias pagos dentro de um desligamento: sem folha seguinte, o valor é acertado na rescisão */
+  desligado: boolean;
+  descontos: Desconto[];
+  total: number;
+}
+
+/**
+ * Desligados com dias já pagos em um mês fechado que ainda não foram descontados (informação para a rescisão).
+ * Inclui todos os dias pendentes do promotor (desligamento e outras ocorrências), para o valor ficar completo.
+ */
+export async function carregarDescontosPendentes(lancamentoId: string, competencia: string): Promise<DescontoPendente[]> {
+  const { data: itens, error } = await supabase.from('ajuda_custo_itens').select('id').eq('lancamento_id', lancamentoId);
+  if (error) throw error;
+  const idsItens = (itens ?? []).map((i: any) => i.id as string);
+
+  const diasPagos: DiaPago[] = [];
+  for (let i = 0; i < idsItens.length; i += 100) {
+    const lote = idsItens.slice(i, i + 100);
+    const dias = await buscarTudo<any>((from, to) =>
+      supabase.from('ajuda_custo_dias').select('id, colaborador_id, data, valor, valor_ajustado').in('item_id', lote).is('descontado_item_id', null).order('id').range(from, to)
+    );
+    dias.forEach((d: any) => diasPagos.push({ id: d.id, colaborador_id: d.colaborador_id, data: d.data, valor: Number(d.valor_ajustado ?? d.valor) }));
+  }
+  if (diasPagos.length === 0) return [];
+
+  const { entrada } = await carregarEntrada(competencia);
+  // só interessam os desligados (sem folha seguinte): para os demais, o desconto já aparece na prévia do mês seguinte
+  const porColab = descontosPosFechamento(entrada, diasPagos);
+  for (const [id, lista] of [...porColab]) if (!lista.some((d) => d.motivo === 'Desligamento')) porColab.delete(id);
+  if (porColab.size === 0) return [];
+
+  const ids = [...porColab.keys()];
+  const cadastro = new Map<string, any>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data } = await supabase.from('colaboradores').select('id, nome, matricula, status').in('id', ids.slice(i, i + 100));
+    (data ?? []).forEach((c: any) => cadastro.set(c.id, c));
+  }
+  const [empresas, supervisores] = await Promise.all([carregarEmpresas(), carregarSupervisores()]);
+
+  return ids
+    .map((id): DescontoPendente => {
+      const c = cadastro.get(id);
+      const descontos = porColab.get(id) ?? [];
+      return {
+        colaborador_id: id,
+        nome: c?.nome ?? 'Promotor não encontrado',
+        matricula: c?.matricula ?? '',
+        empresa: empresas.get(id) ?? null,
+        supervisor: supervisores.get(id) ?? null,
+        inativo: !!c && c.status !== 'ativo',
+        desligado: descontos.some((d) => d.motivo === 'Desligamento'),
+        descontos,
+        total: descontos.reduce((s, d) => Math.round((s + d.valor + Number.EPSILON) * 100) / 100, 0),
+      };
+    })
+    .sort((a, b) => Number(b.desligado) - Number(a.desligado) || a.nome.localeCompare(b.nome));
+}
+
+function itemParaGravar(lancamentoId: string, r: ResultadoColaborador, av?: Avulso, extraDetalhes: Record<string, unknown> = {}) {
+  return {
+    lancamento_id: lancamentoId,
+    colaborador_id: r.colaborador.id,
+    dias_trabalhados: r.diasTrabalhados,
+    bruto: r.bruto,
+    descontos: r.totalDescontos,
+    saldo_anterior: r.saldoAnterior,
+    // valor a lançar = ajuda de custo + Internet + DIF - AJC (alimentação é lançamento à parte)
+    valor_pagar: valorTotalLancar(r.valorPagar, av),
+    saldo_devedor: saldoDevedorFinal(r.valorPagar, r.saldoDevedor, av),
+    internet: av?.internet ?? 0,
+    dif_ajc: av?.dif_ajc ?? 0,
+    alimentacao: av?.alimentacao ?? 0,
+    detalhes: {
+      avulsos: av ? { observacao: av.observacao, dif_dias: av.dif_dias, recorrente: !!av.recorrente } : null,
+      por_dia_semana: r.porDiaSemana,
+      dias_pagos: r.diasPagos.map((d) => ({ data: d.data, valor: d.valor })),
+      dias_excluidos: r.dias.filter((d) => !d.pago).map((d) => ({ data: d.data, valor: d.valor, motivo: d.motivo })),
+      descontos: r.descontos.map((d) => ({ data: d.data, valor: d.valor, motivo: d.motivo, estimado: d.estimado })),
+      ...extraDetalhes,
+    },
+  };
+}
+
+export interface PendentePosFechamento {
+  resultado: ResultadoColaborador;
+  avulso?: Avulso;
+}
+
+/**
+ * Promotores com valores cadastrados para a competência, mas que ficaram de fora do lançamento fechado (ex.: entraram
+ * no mês depois do fechamento). Não estima o mês anterior: promotor novo não tem pagamento anterior.
+ */
+export async function carregarPendentesPosFechamento(lancamentoId: string, competencia: string): Promise<PendentePosFechamento[]> {
+  const { data: itens, error } = await supabase.from('ajuda_custo_itens').select('colaborador_id').eq('lancamento_id', lancamentoId);
+  if (error) throw error;
+  const jaIncluidos = new Set((itens ?? []).map((i: any) => i.colaborador_id as string));
+  const { entrada, avulsos } = await carregarEntrada(competencia);
+  const faltando = entrada.colaboradores.filter((c) => !jaIncluidos.has(c.id));
+  if (faltando.length === 0) return [];
+  const ajustada: EntradaCalculo = { ...entrada, comLancamentoAnterior: new Set([...entrada.comLancamentoAnterior, ...faltando.map((c) => c.id)]) };
+  return faltando
+    .map((c) => calcularColaborador(c, ajustada))
+    .filter((r) => !r.semTarifa && r.bruto > 0)
+    .map((resultado) => ({ resultado, avulso: avulsos.get(resultado.colaborador.id) }));
+}
+
+/** Inclui o promotor no lançamento já fechado, marcado como "pago após o fechamento", e guarda os dias pagos. */
+export async function registrarPagamentoPosFechamento(lancamentoId: string, p: PendentePosFechamento, usuario: string | null) {
+  const r = p.resultado;
+  const { data: item, error } = await supabase
+    .from('ajuda_custo_itens')
+    .insert(itemParaGravar(lancamentoId, r, p.avulso, { pago_apos_fechamento: { em: new Date().toISOString(), por: usuario } }))
+    .select('id')
+    .single();
+  if (error) throw error;
+  try {
+    const dias = r.diasPagos.map((d) => ({ item_id: item.id, colaborador_id: r.colaborador.id, data: d.data, valor: d.valor }));
+    if (dias.length > 0) {
+      const { error: erroDias } = await supabase.from('ajuda_custo_dias').insert(dias);
+      if (erroDias) throw erroDias;
+    }
+  } catch (e) {
+    await supabase.from('ajuda_custo_itens').delete().eq('id', item.id); // o CASCADE remove os dias
+    throw e;
+  }
+}
+
 export async function fecharLancamento(
   competencia: string,
   resultados: ResultadoColaborador[],
@@ -237,30 +374,7 @@ export async function fecharLancamento(
     const { data: itens, error: erroItens } = await supabase
       .from('ajuda_custo_itens')
       .insert(
-        elegiveis.map((r) => {
-          const av = avulsos.get(r.colaborador.id);
-          return {
-          lancamento_id: lanc.id,
-          colaborador_id: r.colaborador.id,
-          dias_trabalhados: r.diasTrabalhados,
-          bruto: r.bruto,
-          descontos: r.totalDescontos,
-          saldo_anterior: r.saldoAnterior,
-          // valor a lançar = ajuda de custo + Internet + DIF - AJC (alimentação é lançamento à parte)
-          valor_pagar: valorTotalLancar(r.valorPagar, av),
-          saldo_devedor: saldoDevedorFinal(r.valorPagar, r.saldoDevedor, av),
-          internet: av?.internet ?? 0,
-          dif_ajc: av?.dif_ajc ?? 0,
-          alimentacao: av?.alimentacao ?? 0,
-          detalhes: {
-            avulsos: av ? { observacao: av.observacao, dif_dias: av.dif_dias, recorrente: !!av.recorrente } : null,
-            por_dia_semana: r.porDiaSemana,
-            dias_pagos: r.diasPagos.map((d) => ({ data: d.data, valor: d.valor })),
-            dias_excluidos: r.dias.filter((d) => !d.pago).map((d) => ({ data: d.data, valor: d.valor, motivo: d.motivo })),
-            descontos: r.descontos.map((d) => ({ data: d.data, valor: d.valor, motivo: d.motivo, estimado: d.estimado })),
-          },
-          };
-        })
+        elegiveis.map((r) => itemParaGravar(lanc.id, r, avulsos.get(r.colaborador.id)))
       )
       .select('id, colaborador_id');
     if (erroItens) throw erroItens;
