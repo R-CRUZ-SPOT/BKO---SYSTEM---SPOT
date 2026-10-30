@@ -259,7 +259,7 @@ export default function AniversariantesPage() {
     const nome = colab.nome.split(' ')[0];
     if (!voucher) return `Olá ${nome}! Feliz aniversário! \u{1F382} Aproveite muito o seu dia!`;
     const codigo = String(voucher.codigo || 'N/A').replace(/^\s*c[óo]digo\s*:?\s*/i, '').replace(/senha\s*:/i, 'senha:').trim();
-    return `Olá ${nome}! Feliz aniversário! \u{1F382} Aqui está seu presente do BKO SYSTEM: seu voucher ${voucher.produto}, código: ${codigo}. Aproveite seu dia!`;
+    return `Olá ${nome}! Feliz aniversário! \u{1F382} Aqui está seu presente da EPSON / SPOT: seu voucher ${voucher.produto}, código: ${codigo}. Aproveite seu dia!`;
   };
 
   const checkEligibility = (admissionDate: string, birthDate: string, vouchers: any[] = []) => {
