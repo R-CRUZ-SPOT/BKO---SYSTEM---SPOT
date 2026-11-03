@@ -40,6 +40,7 @@ export default function ColaboradoresPage() {
   const [newEmpresa, setNewEmpresa] = useState('');
   const [newAvatarFile, setNewAvatarFile] = useState<File | null>(null);
   const [newAvatarPreview, setNewAvatarPreview] = useState<string | null>(null);
+  const [newDataAdmissao, setNewDataAdmissao] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
   // Dialog states for Edit
@@ -58,6 +59,7 @@ export default function ColaboradoresPage() {
   const [editEmpresa, setEditEmpresa] = useState('');
   const [editCtps, setEditCtps] = useState('');
   const [editSerieCtps, setEditSerieCtps] = useState('');
+  const [editDataAdmissao, setEditDataAdmissao] = useState('');
   const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
   const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -733,6 +735,10 @@ export default function ColaboradoresPage() {
         }
         throw error;
       }
+    if (!newDataAdmissao) {
+      toast.error('Preencha a Data de Admissão.');
+      return;
+    }
       
       toast.success('Colaborador atualizado com sucesso!');
       setIsEditDialogOpen(false);
@@ -750,6 +756,7 @@ export default function ColaboradoresPage() {
     setColaboradorToDelete(colaborador);
     setIsDeleteDialogOpen(true);
   };
+           data_admissao: newDataAdmissao || null,
 
   const confirmDeleteColaborador = async () => {
     if (!colaboradorToDelete) return;
@@ -771,6 +778,7 @@ export default function ColaboradoresPage() {
       dataCache.invalidate('colaboradores');
       dataCache.invalidate('dashboard_stats');
       loadColaboradores();
+      setNewDataAdmissao('');
     } catch (error: any) {
       toast.error('Erro ao excluir: ' + error.message);
     } finally {
@@ -793,6 +801,10 @@ export default function ColaboradoresPage() {
     setEditEmpresa(colaborador.empresa || '');
     setEditCtps(colaborador.ctps || '');
     setEditSerieCtps(colaborador.serie_ctps || '');
+    if (!editDataAdmissao) {
+      toast.error('Preencha a Data de Admissão.');
+      return;
+    }
     setEditAvatarFile(null);
     setEditAvatarPreview(colaborador.foto_url || null);
     setIsEditDialogOpen(true);
@@ -821,6 +833,7 @@ export default function ColaboradoresPage() {
       
       XLSX.writeFile(wb, `Colaboradores_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
       toast.success('Relatório gerado com sucesso!');
+          data_admissao: editDataAdmissao || null,
     } catch (error) {
       console.error(error);
       toast.error('Erro ao gerar excel.');
@@ -892,6 +905,7 @@ export default function ColaboradoresPage() {
             Adicionar Colaborador
           </Button>
         </div>
+    setEditDataAdmissao(colaborador.data_admissao || '');
       </div>
 
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -982,7 +996,16 @@ export default function ColaboradoresPage() {
                 <Input 
                   type="date"
                   value={newDataNascimento} 
-                  onChange={e => setNewDataNascimento(e.target.value)} 
+                  onChange={e => setNewDataNascimento(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Data de Admissão</label>
+                <Input
+                  type="date"
+                  required
+                  value={newDataAdmissao}
+                  onChange={e => setNewDataAdmissao(e.target.value)}
                 />
               </div>
             </div>
@@ -1131,7 +1154,16 @@ export default function ColaboradoresPage() {
                 <Input 
                   type="date"
                   value={editDataNascimento} 
-                  onChange={e => setEditDataNascimento(e.target.value)} 
+                  onChange={e => setEditDataNascimento(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Data de Admissão</label>
+                <Input
+                  type="date"
+                  required
+                  value={editDataAdmissao}
+                  onChange={e => setEditDataAdmissao(e.target.value)}
                 />
               </div>
             </div>
