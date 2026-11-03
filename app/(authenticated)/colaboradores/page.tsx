@@ -14,12 +14,17 @@ import { supabase } from '@/lib/supabase';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { aplicarPracasDaPlanilha } from '@/lib/ajuda-custo-data';
 import { dataCache } from '@/lib/data-cache';
 import { ImportarSupervisores } from '@/components/colaboradores/importar-supervisores';
 import { normalizarSupervisor } from '@/lib/supervisor-import';
+import { separarPraca } from '@/lib/ajuda-custo';
 
 import { ImageCropperDialog } from '@/components/ui/image-cropper-dialog';
 import Image from 'next/image';
+
+const FILTRO_TODOS = '__todos__';
+const FILTRO_SEM = '__sem__';
 
 export default function ColaboradoresPage() {
   const [allData, setAllData] = useState<any[]>([]);
@@ -35,12 +40,12 @@ export default function ColaboradoresPage() {
   const [newCargo, setNewCargo] = useState('');
   const [newJob, setNewJob] = useState('');
   const [newDataNascimento, setNewDataNascimento] = useState('');
+  const [newDataAdmissao, setNewDataAdmissao] = useState('');
   const [newCpf, setNewCpf] = useState('');
   const [newRg, setNewRg] = useState('');
   const [newEmpresa, setNewEmpresa] = useState('');
   const [newAvatarFile, setNewAvatarFile] = useState<File | null>(null);
   const [newAvatarPreview, setNewAvatarPreview] = useState<string | null>(null);
-  const [newDataAdmissao, setNewDataAdmissao] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
   // Dialog states for Edit
@@ -54,12 +59,12 @@ export default function ColaboradoresPage() {
   const [editSupervisor, setEditSupervisor] = useState('');
   const [editSupSeguirPlanilha, setEditSupSeguirPlanilha] = useState(false);
   const [editDataNascimento, setEditDataNascimento] = useState('');
+  const [editDataAdmissao, setEditDataAdmissao] = useState('');
   const [editCpf, setEditCpf] = useState('');
   const [editRg, setEditRg] = useState('');
   const [editEmpresa, setEditEmpresa] = useState('');
   const [editCtps, setEditCtps] = useState('');
   const [editSerieCtps, setEditSerieCtps] = useState('');
-  const [editDataAdmissao, setEditDataAdmissao] = useState('');
   const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
   const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -85,6 +90,11 @@ export default function ColaboradoresPage() {
 
   // Filtering states
   const [filterAtivos, setFilterAtivos] = useState<'all' | 'with' | 'without'>('all');
+  const [filterSupervisor, setFilterSupervisor] = useState(FILTRO_TODOS);
+  const [filterUf, setFilterUf] = useState(FILTRO_TODOS);
+  const [filterStatus, setFilterStatus] = useState(FILTRO_TODOS);
+  // colaborador_id -> praça (Cidade/UF) da Ajuda de Custo; é de onde vem a UF do promotor
+  const [pracaPorColab, setPracaPorColab] = useState<Record<string, { praca: string; uf: string | null }>>({});
 
   // Cropper states
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
@@ -97,8 +107,27 @@ export default function ColaboradoresPage() {
 
   useEffect(() => {
     loadColaboradores();
+    loadPracas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Consulta separada e tolerante a falha: se as tabelas de praça ainda não existirem, a página segue sem UF
+  async function loadPracas() {
+    try {
+      const { data, error } = await supabase
+        .from('ajuda_custo_promotor_praca')
+        .select('colaborador_id, ajuda_custo_pracas(nome)');
+      if (error) throw error;
+      const mapa: Record<string, { praca: string; uf: string | null }> = {};
+      (data || []).forEach((r: any) => {
+        const p = Array.isArray(r.ajuda_custo_pracas) ? r.ajuda_custo_pracas[0] : r.ajuda_custo_pracas;
+        if (p?.nome) mapa[r.colaborador_id] = { praca: p.nome, uf: separarPraca(p.nome).uf };
+      });
+      setPracaPorColab(mapa);
+    } catch {
+      setPracaPorColab({});
+    }
+  }
 
   async function loadColaboradores() {
     const cached = dataCache.get<any[]>('colaboradores');
@@ -127,8 +156,58 @@ export default function ColaboradoresPage() {
     }
   }
 
+  const supervisorDe = (c: any): string => (c.supervisor || '').trim();
+  const ufDe = (c: any): string => pracaPorColab[c.id]?.uf || '';
+  const combina = (valor: string, filtro: string) =>
+    filtro === FILTRO_TODOS || (filtro === FILTRO_SEM ? !valor : valor === filtro);
+
+  // Cada lista só oferece valores que existem em combinação com o outro filtro escolhido
+  const opcoesSupervisor = useMemo(() => {
+    const base = allData.filter(c => combina(ufDe(c), filterUf));
+    return {
+      valores: Array.from(new Set(base.map(supervisorDe).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      temSem: base.some(c => !supervisorDe(c)),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allData, filterUf, pracaPorColab]);
+
+  const opcoesUf = useMemo(() => {
+    const base = allData.filter(c => combina(supervisorDe(c), filterSupervisor));
+    return {
+      valores: Array.from(new Set(base.map(ufDe).filter(Boolean))).sort(),
+      temSem: base.some(c => !ufDe(c)),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allData, filterSupervisor, pracaPorColab]);
+
+  const handleFilterSupervisor = (valor: string) => {
+    setFilterSupervisor(valor);
+    if (filterUf !== FILTRO_TODOS && !allData.some(c => combina(supervisorDe(c), valor) && combina(ufDe(c), filterUf))) {
+      setFilterUf(FILTRO_TODOS);
+    }
+  };
+
+  const handleFilterUf = (valor: string) => {
+    setFilterUf(valor);
+    if (filterSupervisor !== FILTRO_TODOS && !allData.some(c => combina(ufDe(c), valor) && combina(supervisorDe(c), filterSupervisor))) {
+      setFilterSupervisor(FILTRO_TODOS);
+    }
+  };
+
+  const filtrosAtivos = filterAtivos !== 'all' || filterSupervisor !== FILTRO_TODOS || filterUf !== FILTRO_TODOS || filterStatus !== FILTRO_TODOS;
+  const limparFiltros = () => {
+    setFilterAtivos('all');
+    setFilterSupervisor(FILTRO_TODOS);
+    setFilterUf(FILTRO_TODOS);
+    setFilterStatus(FILTRO_TODOS);
+  };
+
   const processedData = useMemo(() => {
     let result = [...allData];
+
+    if (filterSupervisor !== FILTRO_TODOS) result = result.filter(c => combina(supervisorDe(c), filterSupervisor));
+    if (filterUf !== FILTRO_TODOS) result = result.filter(c => combina(ufDe(c), filterUf));
+    if (filterStatus !== FILTRO_TODOS) result = result.filter(c => (c.status || 'ativo') === filterStatus);
 
     if (filterAtivos !== 'all') {
       result = result.filter(item => {
@@ -145,7 +224,7 @@ export default function ColaboradoresPage() {
     if (search) {
       const lowerSearch = search.toLowerCase();
       result = result.filter(item => {
-        const searchStr = `${item.nome || ''} ${item.matricula || ''} ${item.email || ''} ${item.cargo || ''} ${item.job || ''} ${item.supervisor || ''} ${item.status || ''} ${item.aparelhos?.map((a:any)=>`${a.modelo} ${a.imei}`).join(' ') || ''} ${item.linhas?.map((l:any)=>l.numero).join(' ') || ''}`.toLowerCase();
+        const searchStr = `${item.nome || ''} ${item.matricula || ''} ${item.email || ''} ${item.cargo || ''} ${item.job || ''} ${item.supervisor || ''} ${pracaPorColab[item.id]?.praca || ''} ${item.status || ''} ${item.aparelhos?.map((a:any)=>`${a.modelo} ${a.imei}`).join(' ') || ''} ${item.linhas?.map((l:any)=>l.numero).join(' ') || ''}`.toLowerCase();
         return searchStr.includes(lowerSearch);
       });
     }
@@ -169,7 +248,8 @@ export default function ColaboradoresPage() {
       return 0;
     });
     return result;
-  }, [allData, search, sortColumn, sortDirection, filterAtivos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allData, search, sortColumn, sortDirection, filterAtivos, filterSupervisor, filterUf, filterStatus, pracaPorColab]);
 
   const totalCount = processedData.length;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
@@ -177,7 +257,7 @@ export default function ColaboradoresPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, sortColumn, sortDirection, filterAtivos]);
+  }, [search, sortColumn, sortDirection, filterAtivos, filterSupervisor, filterUf, filterStatus]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -350,6 +430,8 @@ export default function ColaboradoresPage() {
         const hasJob = hasField(['JOB']);
         const hasCargo = hasField(['CARGO']);
         const hasEmpresa = hasField(['EMPRESA']);
+        const hasUf = hasField(['UF', 'ESTADO', 'DES_UF']);
+        const hasCidade = hasField(['CIDADE', 'MUNICIPIO', 'MUNICÍPIO', 'DES_CIDADE', 'NOM_CIDADE']);
         const hasNascimento = hasField(['NASCIMENTO', 'DATA_NASCIMENTO', 'DATA NASCIMENTO', 'DATA DE NASCIMENTO']);
         const hasCpf = hasField(['CPF']);
         const hasRg = hasField(['RG', 'NUM RG', 'NUMERO RG', 'NÚMERO RG', 'NUM. RG']);
@@ -377,6 +459,9 @@ export default function ColaboradoresPage() {
           // Metadados apenas para a importação (removidos antes de enviar ao banco)
           obj._demitido = isDemitidoRow(row);
           obj._dataRescisao = parseImportDate(getColValue(row, ['DATA RESCISAO', 'DATA RESCISÃO', 'DATA_RESCISAO']));
+          // UF e cidade definem a praça do promotor (Ajuda de Custo); não são colunas de colaboradores
+          obj._uf = getColValue(row, ['UF', 'ESTADO', 'DES_UF'])?.toString().trim() || null;
+          obj._cidade = getColValue(row, ['CIDADE', 'MUNICIPIO', 'MUNICÍPIO', 'DES_CIDADE', 'NOM_CIDADE'])?.toString().trim() || null;
 
           if (hasEmail) obj.email = getColValue(row, ['EMAIL', 'E-MAIL']) || null;
           if (hasAdmissao) obj.data_admissao = parseImportDate(getColValue(row, ['ADMISSAO', 'ADMISSÃO', 'DATA_ADMISSAO', 'DATA ADMISSAO', 'DATA DE ADMISSAO', 'DATA DE ADMISSÃO']));
@@ -437,10 +522,11 @@ export default function ColaboradoresPage() {
         });
 
         // Demitidos nunca são cadastrados: só os demais seguem para upsert/reatribuição
-        const stripMeta = ({ _demitido, _dataRescisao, ...clean }: any) => clean;
+        const stripMeta = ({ _demitido, _dataRescisao, _uf, _cidade, ...clean }: any) => clean;
         const activeRows = uniqueFormattedData.filter((row: any) => !row._demitido);
         const demitidoRows = uniqueFormattedData.filter((row: any) => row._demitido);
 
+        let pracaFalhou = false;
         const rowsToUpsert: any[] = [];
         const rowsToReassign: { id: string; data: any }[] = [];
 
@@ -478,6 +564,22 @@ export default function ColaboradoresPage() {
           if (error) reassignErrors++;
         }
         const reassignedCount = rowsToReassign.length - reassignErrors;
+
+        // Praça do promotor a partir de UF e Cidade da planilha (Ajuda de Custo)
+        let pracaMsg = '';
+        if (hasUf && hasCidade) {
+          try {
+            const r = await aplicarPracasDaPlanilha(activeRows.map((row: any) => ({ matricula: row.matricula, cidade: row._cidade, uf: row._uf })));
+            pracaMsg =
+              ` Praças: ${r.vinculados} promotor(es) vinculado(s) pela UF/Cidade` +
+              (r.pracasNovas > 0 ? `, ${r.pracasNovas} praça(s) nova(s) criada(s)` : '') +
+              (r.semDados > 0 ? `, ${r.semDados} linha(s) sem cidade ou UF válida` : '') +
+              '.';
+          } catch (e: any) {
+            pracaMsg = ` Não foi possível vincular as praças: ${e.message} (confira se scripts/ajuda-de-custo-pracas.sql foi executado).`;
+            pracaFalhou = true;
+          }
+        }
 
         // Demitidos que já estão cadastrados como ativos: inativa o colaborador, mantendo
         // os vínculos de aparelhos/linhas (as telas de ativos sinalizam "promotor desligado").
@@ -537,7 +639,7 @@ export default function ColaboradoresPage() {
           });
         }
 
-        const hasWarnings = reassignErrors > 0 || inactivateErrors > 0;
+        const hasWarnings = reassignErrors > 0 || inactivateErrors > 0 || pracaFalhou;
         setImportResult({
           success: !hasWarnings,
           title: hasWarnings ? 'Importação concluída com avisos' : 'Importação concluída',
@@ -548,7 +650,8 @@ export default function ColaboradoresPage() {
             (demitidoRows.length > 0
               ? ` ${demitidoRows.length} promotor(es) demitido(s) na planilha: ${inactivated.length} inativado(s) no sistema (vínculos mantidos) e ${demitidosIgnorados} ignorado(s) (não cadastrados ou já inativos).`
               : '') +
-            (inactivateErrors > 0 ? ` ${inactivateErrors} inativação(ões) falharam.` : ''),
+            (inactivateErrors > 0 ? ` ${inactivateErrors} inativação(ões) falharam.` : '') +
+            pracaMsg,
           details: details.length > 0 ? details : undefined
         });
         setIsImportResultDialogOpen(true);
@@ -557,6 +660,7 @@ export default function ColaboradoresPage() {
         dataCache.invalidate('linhas');
         dataCache.invalidate('dashboard_stats');
         loadColaboradores();
+        loadPracas();
       } catch (error: any) {
         console.error(error);
         setImportResult({
@@ -631,6 +735,10 @@ export default function ColaboradoresPage() {
       toast.error('Preencha o Nome e Matrícula.');
       return;
     }
+    if (!newDataAdmissao) {
+      toast.error('Preencha a Data de Admissão.');
+      return;
+    }
     
     setIsCreating(true);
     try {
@@ -648,6 +756,7 @@ export default function ColaboradoresPage() {
            cargo: newCargo || null, 
            job: newJob || null,
            data_nascimento: newDataNascimento || null,
+           data_admissao: newDataAdmissao || null,
            cpf: newCpf || null,
            rg: newRg || null,
            empresa: newEmpresa.trim() || null,
@@ -669,6 +778,7 @@ export default function ColaboradoresPage() {
       setNewCargo('');
       setNewJob('');
       setNewDataNascimento('');
+      setNewDataAdmissao('');
       setNewCpf('');
       setNewRg('');
       setNewEmpresa('');
@@ -689,6 +799,10 @@ export default function ColaboradoresPage() {
     if (!editingColaborador) return;
     if (!editNome || !editMatricula) {
       toast.error('Preencha o Nome e a Matrícula.');
+      return;
+    }
+    if (!editDataAdmissao) {
+      toast.error('Preencha a Data de Admissão.');
       return;
     }
     
@@ -719,6 +833,7 @@ export default function ColaboradoresPage() {
           cargo: editCargo || null,
           job: editJob || null,
           data_nascimento: editDataNascimento || null,
+          data_admissao: editDataAdmissao || null,
           cpf: editCpf || null,
           rg: editRg || null,
           empresa: editEmpresa.trim() || null,
@@ -735,10 +850,6 @@ export default function ColaboradoresPage() {
         }
         throw error;
       }
-    if (!newDataAdmissao) {
-      toast.error('Preencha a Data de Admissão.');
-      return;
-    }
       
       toast.success('Colaborador atualizado com sucesso!');
       setIsEditDialogOpen(false);
@@ -756,7 +867,6 @@ export default function ColaboradoresPage() {
     setColaboradorToDelete(colaborador);
     setIsDeleteDialogOpen(true);
   };
-           data_admissao: newDataAdmissao || null,
 
   const confirmDeleteColaborador = async () => {
     if (!colaboradorToDelete) return;
@@ -778,7 +888,6 @@ export default function ColaboradoresPage() {
       dataCache.invalidate('colaboradores');
       dataCache.invalidate('dashboard_stats');
       loadColaboradores();
-      setNewDataAdmissao('');
     } catch (error: any) {
       toast.error('Erro ao excluir: ' + error.message);
     } finally {
@@ -796,15 +905,12 @@ export default function ColaboradoresPage() {
     setEditSupervisor(colaborador.supervisor || '');
     setEditSupSeguirPlanilha(false);
     setEditDataNascimento(colaborador.data_nascimento || '');
+    setEditDataAdmissao(colaborador.data_admissao || '');
     setEditCpf(colaborador.cpf || '');
     setEditRg(colaborador.rg || '');
     setEditEmpresa(colaborador.empresa || '');
     setEditCtps(colaborador.ctps || '');
     setEditSerieCtps(colaborador.serie_ctps || '');
-    if (!editDataAdmissao) {
-      toast.error('Preencha a Data de Admissão.');
-      return;
-    }
     setEditAvatarFile(null);
     setEditAvatarPreview(colaborador.foto_url || null);
     setIsEditDialogOpen(true);
@@ -820,6 +926,8 @@ export default function ColaboradoresPage() {
         'E-mail': colab.email || '',
         'Cargo': colab.cargo || '',
         'Supervisor': colab.supervisor || '',
+        'UF': pracaPorColab[colab.id]?.uf || '',
+        'Praça': pracaPorColab[colab.id]?.praca || '',
         'Job': colab.job || '',
         'Status': colab.status.toUpperCase(),
         'Aparelhos': colab.aparelhos?.map((a: any) => `${a.modelo} (${a.imei})`).join('; ') || '',
@@ -833,7 +941,6 @@ export default function ColaboradoresPage() {
       
       XLSX.writeFile(wb, `Colaboradores_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
       toast.success('Relatório gerado com sucesso!');
-          data_admissao: editDataAdmissao || null,
     } catch (error) {
       console.error(error);
       toast.error('Erro ao gerar excel.');
@@ -905,7 +1012,6 @@ export default function ColaboradoresPage() {
             Adicionar Colaborador
           </Button>
         </div>
-    setEditDataAdmissao(colaborador.data_admissao || '');
       </div>
 
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -1333,11 +1439,57 @@ export default function ColaboradoresPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Filter className="w-4 h-4 text-zinc-400 font-bold" />
+            <Select value={filterSupervisor} onValueChange={(v: string | null) => v && handleFilterSupervisor(v)}>
+              <SelectTrigger className="w-[190px] h-10 rounded-xl bg-zinc-50/50 border-zinc-200 text-xs font-medium">
+                <SelectValue>
+                  {(v: string) => v === FILTRO_TODOS ? 'Todos os supervisores' : v === FILTRO_SEM ? 'Sem supervisor' : v}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-zinc-200 shadow-xl">
+                <SelectItem value={FILTRO_TODOS} className="text-xs cursor-pointer rounded-lg focus:bg-zinc-100">Todos os supervisores</SelectItem>
+                {opcoesSupervisor.temSem && (
+                  <SelectItem value={FILTRO_SEM} className="text-xs cursor-pointer rounded-lg focus:bg-amber-50 focus:text-amber-700">Sem supervisor</SelectItem>
+                )}
+                {opcoesSupervisor.valores.map(s => (
+                  <SelectItem key={s} value={s} className="text-xs cursor-pointer rounded-lg focus:bg-zinc-100">{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterUf} onValueChange={(v: string | null) => v && handleFilterUf(v)}>
+              <SelectTrigger className="w-[130px] h-10 rounded-xl bg-zinc-50/50 border-zinc-200 text-xs font-medium">
+                <SelectValue>
+                  {(v: string) => v === FILTRO_TODOS ? 'Todas as UFs' : v === FILTRO_SEM ? 'Sem UF' : v}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-zinc-200 shadow-xl">
+                <SelectItem value={FILTRO_TODOS} className="text-xs cursor-pointer rounded-lg focus:bg-zinc-100">Todas as UFs</SelectItem>
+                {opcoesUf.temSem && (
+                  <SelectItem value={FILTRO_SEM} className="text-xs cursor-pointer rounded-lg focus:bg-amber-50 focus:text-amber-700">Sem UF</SelectItem>
+                )}
+                {opcoesUf.valores.map(u => (
+                  <SelectItem key={u} value={u} className="text-xs cursor-pointer rounded-lg focus:bg-zinc-100">{u}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterStatus} onValueChange={(v: string | null) => v && setFilterStatus(v)}>
+              <SelectTrigger className="w-[130px] h-10 rounded-xl bg-zinc-50/50 border-zinc-200 text-xs font-medium">
+                <SelectValue>
+                  {(v: string) => v === 'ativo' ? 'Ativos' : v === 'inativo' ? 'Inativos' : 'Todos os status'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-zinc-200 shadow-xl">
+                <SelectItem value={FILTRO_TODOS} className="text-xs cursor-pointer rounded-lg focus:bg-zinc-100">Todos os status</SelectItem>
+                <SelectItem value="ativo" className="text-xs cursor-pointer rounded-lg focus:bg-emerald-50 focus:text-emerald-700">Ativos</SelectItem>
+                <SelectItem value="inativo" className="text-xs cursor-pointer rounded-lg focus:bg-rose-50 focus:text-rose-700">Inativos</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={filterAtivos} onValueChange={(val: any) => setFilterAtivos(val)}>
               <SelectTrigger className="w-[200px] h-10 rounded-xl bg-zinc-50/50 border-zinc-200 text-xs font-medium">
-                <SelectValue placeholder="Filtrar por Vínculos" />
+                <SelectValue>
+                  {(v: string) => v === 'with' ? 'Com Ativos Vinculados' : v === 'without' ? 'Sem Ativos Vinculados' : 'Todos os Colaboradores'}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent className="rounded-xl border-zinc-200 shadow-xl">
                 <SelectItem value="all" className="text-xs cursor-pointer rounded-lg focus:bg-zinc-100">Todos os Colaboradores</SelectItem>
@@ -1345,6 +1497,11 @@ export default function ColaboradoresPage() {
                 <SelectItem value="without" className="text-xs cursor-pointer rounded-lg focus:bg-amber-50 focus:text-amber-700">Sem Ativos Vinculados</SelectItem>
               </SelectContent>
             </Select>
+            {filtrosAtivos && (
+              <Button variant="ghost" size="sm" className="h-10 rounded-xl text-xs text-zinc-500 hover:text-zinc-900" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            )}
           </div>
         </CardHeader>
         {selectedIds.size > 0 && (
@@ -1477,6 +1634,7 @@ export default function ColaboradoresPage() {
                           <span className="text-sm text-zinc-700">{colab.cargo || '-'}</span>
                           <span className="text-[10px] font-bold uppercase tracking-tighter text-zinc-400">{colab.job || 'OUTROS'}</span>
                           {colab.supervisor && <span className="text-[10px] text-zinc-500" title={colab.supervisor_origem === 'manual' ? 'Supervisor definido manualmente' : 'Supervisor da planilha de Roteiro'}>SUP: {colab.supervisor}</span>}
+                          {pracaPorColab[colab.id] && <span className="text-[10px] text-zinc-500" title="Praça do promotor (Ajuda de Custo)">PRAÇA: {pracaPorColab[colab.id].praca}</span>}
                         </div>
                       </TableCell>
                       <TableCell className="px-6 py-4">

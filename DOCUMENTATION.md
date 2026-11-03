@@ -133,7 +133,7 @@ Rota `/ajuda-de-custo`. Antes de usar, execute no SQL Editor do Supabase, nesta 
 - **Valores por Dia**: valor de cada dia da semana por promotor, com histórico por data de vigência.
 - **Ocorrências**: férias, atestados, faltas e feriados locais (períodos de datas).
 - **Feriados**: nacionais (calculados) + feriados adicionais, para todos ou por **praça**, com opção "repete todo ano" (data fixa).
-- **Praças**: cidade/estado do promotor (uma por promotor). Feriados regionais valem automaticamente para quem está na praça.
+- **Praças**: cidade/estado do promotor (uma por promotor). Feriados regionais valem automaticamente para quem está na praça. A praça é definida na importação da planilha de colaboradores (Gestão de Pessoas) pelas colunas **UF** e **Cidade**: usa a praça existente com a mesma cidade/UF (sem diferenciar acento ou caixa) ou cria "Cidade/UF", e substitui a praça anterior do promotor. Linhas sem cidade ou UF válida mantêm a praça atual.
 - **Cálculo do Mês**: competência = mês seguinte. Bruto = Σ valor do dia × dias do mês (sem feriados/ocorrências).
   Descontos = dias **já pagos** em lançamentos fechados que agora têm ocorrência. Se descontos > bruto, paga 0 e o saldo
   devedor é abatido no lançamento seguinte. "Fechar" grava o snapshot dos dias pagos (`ajuda_custo_dias`).

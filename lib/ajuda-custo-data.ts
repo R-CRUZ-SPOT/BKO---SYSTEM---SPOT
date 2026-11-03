@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { ItemDash, OcorrenciaDash } from '@/lib/ajuda-custo-dashboard';
+import { chavePraca, planejarPracas, type LinhaPracaPlanilha } from '@/lib/praca-import';
 import {
   type Avulso,
   type RecorrenteInternet,
@@ -17,6 +18,7 @@ import {
   saldoDevedorFinal,
   competenciaPadrao,
   descontosPosFechamento,
+  separarPraca,
   type Desconto,
   feriadosNacionaisEntre,
   somarMeses,
@@ -219,6 +221,40 @@ export async function carregarEntrada(competencia: string): Promise<Carregamento
       inicioControle: competenciaPadrao(),
     },
   };
+}
+
+/**
+ * Aplica o vínculo promotor x praça a partir das colunas UF e Cidade da planilha de colaboradores: usa a praça
+ * existente (mesma cidade e UF, sem diferenciar acento/caixa) ou cria "Cidade/UF". Substitui a praça anterior do promotor.
+ */
+export async function aplicarPracasDaPlanilha(linhas: LinhaPracaPlanilha[]): Promise<{ vinculados: number; pracasNovas: number; semDados: number; semCadastro: number }> {
+  const matriculas = [...new Set(linhas.map((l) => String(l.matricula)))];
+  const colaboradores: { id: string; matricula: string }[] = [];
+  for (let i = 0; i < matriculas.length; i += 100) {
+    const { data, error } = await supabase.from('colaboradores').select('id, matricula').in('matricula', matriculas.slice(i, i + 100));
+    if (error) throw error;
+    (data ?? []).forEach((c: any) => colaboradores.push({ id: c.id, matricula: String(c.matricula) }));
+  }
+  const { data: pracasRows, error: erroPracas } = await supabase.from('ajuda_custo_pracas').select('id, nome');
+  if (erroPracas) throw erroPracas;
+
+  const plano = planejarPracas(linhas, colaboradores, (pracasRows ?? []) as { id: string; nome: string }[]);
+  const idPorChave = new Map<string, string>();
+  if (plano.novas.length > 0) {
+    const { data: criadas, error } = await supabase.from('ajuda_custo_pracas').insert(plano.novas.map((n) => ({ nome: n.nome }))).select('id, nome');
+    if (error) throw error;
+    (criadas ?? []).forEach((p: any) => {
+      const { cidade, uf } = separarPraca(p.nome);
+      idPorChave.set(chavePraca(cidade, uf), p.id);
+    });
+  }
+
+  const registros = plano.vinculos.map((v) => ({ colaborador_id: v.colaborador_id, praca_id: v.praca_id ?? idPorChave.get(v.chave) })).filter((v): v is { colaborador_id: string; praca_id: string } => !!v.praca_id);
+  for (let i = 0; i < registros.length; i += 500) {
+    const { error } = await supabase.from('ajuda_custo_promotor_praca').upsert(registros.slice(i, i + 500), { onConflict: 'colaborador_id' });
+    if (error) throw error;
+  }
+  return { vinculados: registros.length, pracasNovas: plano.novas.length, semDados: plano.semDados, semCadastro: plano.semCadastro };
 }
 
 export interface DescontoPendente {
