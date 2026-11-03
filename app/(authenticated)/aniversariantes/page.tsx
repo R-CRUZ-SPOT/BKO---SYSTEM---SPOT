@@ -48,7 +48,7 @@ export default function AniversariantesPage() {
     try {
       let { data, error } = await supabase
         .from('colaboradores')
-        .select('*, vouchers(id, produto, status, codigo, data_atribuicao), linhas(numero, ddd)')
+        .select('*, vouchers(id, produto, valor, status, codigo, data_atribuicao), linhas(numero, ddd)')
         .eq('status', 'ativo')
         .not('data_nascimento', 'is', null);
 
@@ -57,7 +57,7 @@ export default function AniversariantesPage() {
         if (error.message?.includes('data_atribuicao')) {
           const { data: fallbackData, error: fallbackError } = await supabase
             .from('colaboradores')
-            .select('*, vouchers(id, produto, status, codigo), linhas(numero, ddd)')
+            .select('*, vouchers(id, produto, valor, status, codigo), linhas(numero, ddd)')
             .eq('status', 'ativo')
             .not('data_nascimento', 'is', null);
           
@@ -254,12 +254,23 @@ export default function AniversariantesPage() {
     return semData.length === 1 && vouchers.length === 1 ? semData[0] : undefined;
   };
 
+  // O valor pode vir como "70", "70.00", "70,00" ou "R$ 70,00"; devolve sempre "R$ 70,00" (vazio se não houver)
+  const formatarValorVoucher = (valor: unknown) => {
+    const bruto = String(valor ?? '').replace(/R\$/i, '').trim();
+    if (!bruto) return '';
+    const num = Number(bruto.includes(',') ? bruto.replace(/\./g, '').replace(',', '.') : bruto);
+    if (!Number.isFinite(num)) return String(valor).trim();
+    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }).replace(/ /g, ' ');
+  };
+
   // O código vem da planilha como "Código : 123 Senha : 456"; evita repetir o rótulo na mensagem
   const montarMensagemAniversario = (colab: any, voucher?: any) => {
     const nome = colab.nome.split(' ')[0];
     if (!voucher) return `Olá ${nome}! Feliz aniversário! \u{1F382} Aproveite muito o seu dia!`;
     const codigo = String(voucher.codigo || 'N/A').replace(/^\s*c[óo]digo\s*:?\s*/i, '').replace(/senha\s*:/i, 'senha:').trim();
-    return `Olá ${nome}! Feliz aniversário! \u{1F382} Aqui está seu presente da EPSON / SPOT: seu voucher ${voucher.produto}, código: ${codigo}. Aproveite seu dia!`;
+    const valor = formatarValorVoucher(voucher.valor);
+    const produto = valor ? `${voucher.produto} no valor de ${valor}` : voucher.produto;
+    return `Olá ${nome}! Feliz aniversário! \u{1F382} Aqui está seu presente da EPSON / SPOT: seu voucher ${produto}, código: ${codigo}. Aproveite seu dia!`;
   };
 
   const checkEligibility = (admissionDate: string, birthDate: string, vouchers: any[] = []) => {
