@@ -40,7 +40,7 @@ export default function ValoresPage() {
   const [linhas, setLinhas] = useState<LinhaValor[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
-  const [ocultarInativos, setOcultarInativos] = useState(false);
+  const [ocultarInativos, setOcultarInativos] = useState(true);
   const [remocaoAberta, setRemocaoAberta] = useState(false);
   const [removendo, setRemovendo] = useState(false);
 
