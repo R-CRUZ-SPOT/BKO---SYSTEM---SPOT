@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { diferencasNoMes, somarMeses } from '@/lib/ajuda-custo';
+import { diferencasNoMes, saldoDiferencas, somarMeses } from '@/lib/ajuda-custo';
 import { carregarEntrada } from '@/lib/ajuda-custo-data';
 
 // Quantos promotores têm diferença de valor (acréscimo) pendente de acerto imediato no mês corrente (para a bolinha vermelha dos menus).
@@ -19,7 +19,7 @@ async function buscar(): Promise<number> {
       try {
         const mes = new Date().toLocaleDateString('sv-SE').slice(0, 7);
         const { entrada } = await carregarEntrada(somarMeses(mes, 1));
-        const n = entrada.colaboradores.filter((c) => diferencasNoMes(c, entrada, mes).some((d) => d.diferenca > 0)).length;
+        const n = entrada.colaboradores.filter((c) => saldoDiferencas(diferencasNoMes(c, entrada, mes)).saldo > 0).length;
         cache = { em: Date.now(), n };
         return n;
       } catch {

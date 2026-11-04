@@ -44,6 +44,8 @@ export interface LinhaLancamento {
   listaDescontos: { data: string; valor: number; motivo: string; estimado?: boolean }[];
   /** ISO de quando o pagamento foi incluído depois do fechamento do mês (promotor que entrou após o fechamento) */
   pagoApos: string | null;
+  /** acerto imediato (saldo positivo de mudança de valor) registrado depois do fechamento; já somado em valorPagar */
+  acertoApos: { valor: number; em: string } | null;
 }
 
 export function linhaDeResultado(r: ResultadoColaborador, av?: Avulso): LinhaLancamento {
@@ -73,6 +75,7 @@ export function linhaDeResultado(r: ResultadoColaborador, av?: Avulso): LinhaLan
     excluidos: r.dias.filter((d) => !d.pago).map((d) => ({ data: d.data, valor: d.valor, motivo: d.motivo })),
     listaDescontos: r.descontos,
     pagoApos: null,
+    acertoApos: null,
   };
 }
 
@@ -106,7 +109,26 @@ export function linhaDeItemSalvo(item: any): LinhaLancamento {
     excluidos: det.dias_excluidos ?? [],
     listaDescontos: det.descontos ?? [],
     pagoApos: det.pago_apos_fechamento?.em ?? null,
+    acertoApos: null,
   };
+}
+
+/** Soma à folha fechada os acertos registrados depois do fechamento (promotor sem item na folha ganha uma linha). */
+export function comAcertosPosFechamento(linhas: LinhaLancamento[], acertos: { colaborador_id: string; nome: string; matricula: string; valor: number; em: string }[]): LinhaLancamento[] {
+  const resultado = [...linhas];
+  for (const a of acertos) {
+    const i = resultado.findIndex((l) => l.id === a.colaborador_id);
+    if (i >= 0) {
+      resultado[i] = { ...resultado[i], valorPagar: r2(resultado[i].valorPagar + a.valor), acertoApos: { valor: a.valor, em: a.em } };
+    } else {
+      resultado.push({
+        id: a.colaborador_id, nome: a.nome, matricula: a.matricula, empresa: null, supervisor: null, dias: 0, uteis: 0, descontados: 0, bruto: 0, descontos: 0, saldoAnterior: 0,
+        valorAjuda: 0, internet: 0, internetRecorrente: false, difAjc: 0, alimentacao: 0, observacaoAvulso: null, difDiasCount: 0, valorPagar: a.valor, saldoDevedor: 0,
+        porDiaSemana: [], pagos: [], excluidos: [], listaDescontos: [], pagoApos: null, acertoApos: { valor: a.valor, em: a.em },
+      });
+    }
+  }
+  return resultado;
 }
 
 const TH = 'text-[10px] font-bold uppercase tracking-wide text-zinc-500';
@@ -203,6 +225,7 @@ export function TabelaLancamento({
         'Saldo devedor p/ próximo mês': l.saldoDevedor,
         Observação: l.observacaoAvulso ?? '',
         'Pago após o fechamento': l.pagoApos ? formatarData(l.pagoApos.slice(0, 10)) : '',
+        'Acerto após o fechamento': l.acertoApos ? l.acertoApos.valor : '',
       }));
       const descontos = linhas.flatMap((l) =>
         l.listaDescontos.map((d) => ({ Matrícula: l.matricula, Promotor: l.nome, Data: formatarData(d.data), Valor: d.valor, Motivo: d.motivo }))
@@ -318,6 +341,9 @@ export function TabelaLancamento({
                         <TableCell className="pl-3 pr-0">{aberto ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronRight className="w-4 h-4 text-zinc-400" />}</TableCell>
                         <TableCell className="px-2 py-3 max-w-[190px] whitespace-normal">
                           <p className="text-sm font-bold text-zinc-900">{l.nome}</p>
+                          {l.acertoApos && (
+                            <p className="mt-0.5 inline-block rounded-md bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">Acerto após o fechamento + {moeda(l.acertoApos.valor)} · {formatarData(l.acertoApos.em.slice(0, 10))}</p>
+                          )}
                           {l.pagoApos && (
                             <p className="mt-0.5 inline-block rounded-md bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">Pago após o fechamento · {formatarData(l.pagoApos.slice(0, 10))}</p>
                           )}

@@ -5,9 +5,9 @@ import { Lock, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
-import { buscarTudo, carregarEmpresas, carregarSupervisores, reabrirLancamento } from '@/lib/ajuda-custo-data';
+import { buscarTudo, carregarAcertosPosFechamento, carregarEmpresas, carregarSupervisores, reabrirLancamento } from '@/lib/ajuda-custo-data';
 import { nomeCompetencia } from '@/lib/ajuda-custo';
-import { TabelaLancamento, linhaDeItemSalvo, type LinhaLancamento } from './tabela-lancamento';
+import { TabelaLancamento, comAcertosPosFechamento, linhaDeItemSalvo, type LinhaLancamento } from './tabela-lancamento';
 import { DescontosPendentes } from './descontos-pendentes';
 import { PendentesPosFechamento } from './pendentes-pos-fechamento';
 
@@ -46,10 +46,10 @@ export function LancamentoFechado({
             console.error(e);
           }
         }
-        const [empresas, supervisores] = await Promise.all([carregarEmpresas(), carregarSupervisores()]);
-        setLinhas(itens.map(linhaDeItemSalvo).map((l) => ({ ...l, empresa: empresas.get(l.id) ?? null, supervisor: supervisores.get(l.id) ?? null })).sort((a, b) => a.nome.localeCompare(b.nome)));
+        const [empresas, supervisores, acertos] = await Promise.all([carregarEmpresas(), carregarSupervisores(), carregarAcertosPosFechamento(lancamento.competencia, lancamento.fechado_em)]);
+        setLinhas(comAcertosPosFechamento(itens.map(linhaDeItemSalvo), acertos).map((l) => ({ ...l, empresa: empresas.get(l.id) ?? null, supervisor: supervisores.get(l.id) ?? null })).sort((a, b) => a.nome.localeCompare(b.nome)));
       });
-  }, [lancamento.id, versao]);
+  }, [lancamento.id, lancamento.competencia, lancamento.fechado_em, versao]);
 
   async function reabrir() {
     const ok = window.confirm(

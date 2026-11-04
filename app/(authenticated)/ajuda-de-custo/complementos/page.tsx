@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useAuth } from '@/lib/auth-context';
-import { DIAS_SEMANA, type DiferencaDia, diaSemana, diferencasNoMes, ehTemporario, formatarData, moeda, nomeCompetencia, r2, somarMeses } from '@/lib/ajuda-custo';
+import { DIAS_SEMANA, type DiferencaDia, diaSemana, diferencasNoMes, saldoDiferencas, ehTemporario, formatarData, moeda, nomeCompetencia, r2, somarMeses } from '@/lib/ajuda-custo';
 import { carregarEmpresas, carregarEntrada, type CarregamentoCalculo } from '@/lib/ajuda-custo-data';
 import { BadgeTmp } from '@/components/ajuda-custo/badge-tmp';
 import { supabase } from '@/lib/supabase';
@@ -35,10 +35,14 @@ interface Pendencia {
   matricula: string;
   empresa: string | null;
   supervisor: string | null;
-  /** dias com acréscimo: pagos agora */
+  /** todos os dias do mês com diferença de valor (aumentos e reduções) */
   dif: DiferencaDia[];
+  /** saldo = aumentos + reduções; positivo é pago agora */
   total: number;
-  /** dias com redução: descontados na próxima folha */
+  aumentos: number;
+  /** soma das reduções (negativa) */
+  reducoesValor: number;
+  /** o mesmo conjunto de dias, para a lista de saldos negativos (descontados na próxima folha) */
   reducao: DiferencaDia[];
   totalReducao: number;
 }
@@ -88,26 +92,27 @@ export default function ComplementosPage() {
     return dados.entrada.colaboradores
       .map((c) => {
         const todas = diferencasNoMes(c, dados.entrada, mes);
-        const dif = todas.filter((d) => d.diferenca > 0);
-        const reducao = todas.filter((d) => d.diferenca < 0);
+        const { aumentos, reducoes, saldo } = saldoDiferencas(todas);
         return {
           id: c.id,
           nome: c.nome,
           matricula: c.matricula ?? '',
           empresa: c.empresa ?? null,
           supervisor: c.supervisor ?? null,
-          dif,
-          total: r2(dif.reduce((s, d) => s + d.diferenca, 0)),
-          reducao,
-          totalReducao: r2(reducao.reduce((s, d) => s + d.diferenca, 0)),
+          dif: todas,
+          total: saldo,
+          aumentos,
+          reducoesValor: reducoes,
+          reducao: todas,
+          totalReducao: saldo,
         };
       })
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [dados, mes]);
 
-  // acréscimos: pagos na hora (acerto imediato). Reduções: só podem ser descontadas na próxima folha.
-  const pendencias = useMemo(() => analise.filter((p) => p.dif.length > 0), [analise]);
-  const reducoes = useMemo(() => analise.filter((p) => p.reducao.length > 0), [analise]);
+  // saldo positivo (aumentos - reduções): pago na hora (acerto imediato). Saldo negativo: descontado na próxima folha.
+  const pendencias = useMemo(() => analise.filter((p) => p.dif.length > 0 && p.total >= 0), [analise]);
+  const reducoes = useMemo(() => analise.filter((p) => p.reducao.length > 0 && p.totalReducao < 0), [analise]);
   const totalPendencias = r2(pendencias.reduce((s, p) => s + p.total, 0));
   const totalReducoes = r2(reducoes.reduce((s, p) => s + p.totalReducao, 0));
   const doMes = lista.filter((c) => c.competencia === mes);
@@ -185,7 +190,7 @@ export default function ComplementosPage() {
     <div className="space-y-4">
       <p className="text-xs text-zinc-500 max-w-3xl">
         Quando o valor diário de um promotor muda <strong>durante o mês</strong>, o sistema detecta a diferença dos dias a partir da nova vigência (inclusive os que ainda serão
-        trabalhados) e lista aqui para você pagar na hora. Mudanças com vigência em meses futuros não aparecem: a folha daquele mês já sai com o valor certo. Depois de registrado,
+        trabalhados) e <strong>compensa aumentos e reduções</strong>. Se o saldo for positivo, ele aparece aqui para você pagar na hora e entra na folha do mês como acerto após o fechamento; se for negativo, vira desconto na próxima folha. Mudanças com vigência em meses futuros não aparecem: a folha daquele mês já sai com o valor certo. Depois de registrado,
         o acerto não é cobrado nem pago de novo no fechamento. Ao registrar, o acerto já fica marcado como <strong>lançado</strong>: o pagamento é feito por você na hora; se
         precisar, desmarque na lista de registrados.
       </p>
@@ -207,9 +212,9 @@ export default function ComplementosPage() {
         </Card>
         <Card className={cn('border-zinc-100 shadow-sm', reducoes.length > 0 ? 'bg-amber-500 text-white' : 'bg-white/50')}>
           <CardContent className="p-5">
-            <p className={cn('text-[10px] font-black uppercase tracking-widest', reducoes.length > 0 ? 'text-amber-100' : 'text-zinc-400')}>Reduções p/ próxima folha</p>
+            <p className={cn('text-[10px] font-black uppercase tracking-widest', reducoes.length > 0 ? 'text-amber-100' : 'text-zinc-400')}>Saldo negativo p/ próxima folha</p>
             <p className="text-2xl font-black tabular-nums mt-1">{reducoes.length}</p>
-            <p className={cn('text-[11px] mt-1', reducoes.length > 0 ? 'text-amber-100' : 'text-zinc-500')}>{reducoes.length > 0 ? `Total ${moeda(totalReducoes)}` : 'Nenhuma redução de valor'}</p>
+            <p className={cn('text-[11px] mt-1', reducoes.length > 0 ? 'text-amber-100' : 'text-zinc-500')}>{reducoes.length > 0 ? `Total ${moeda(totalReducoes)}` : 'Nenhum saldo negativo'}</p>
           </CardContent>
         </Card>
         <Card className="border-zinc-100 shadow-sm bg-emerald-600 text-white">
@@ -225,7 +230,7 @@ export default function ComplementosPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b border-zinc-100 bg-white/80">
           <div>
             <h3 className="text-sm font-black uppercase tracking-tight text-zinc-900">Diferenças a acertar em {nomeCompetencia(mes)}</h3>
-            <p className="text-[11px] text-zinc-500">Promotores cujo valor diário mudou no mês</p>
+            <p className="text-[11px] text-zinc-500">Saldo da mudança de valor no mês (aumentos − reduções)</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Observação (opcional)" className="h-9 w-56 rounded-xl bg-white" />
@@ -241,7 +246,7 @@ export default function ComplementosPage() {
                 <TableHead className="w-8" />
                 <TableHead className={TH}>Promotor</TableHead>
                 <TableHead className={cn(TH, 'text-center')}>Dias</TableHead>
-                <TableHead className={cn(TH, 'text-right')}>Diferença</TableHead>
+                <TableHead className={cn(TH, 'text-right')}>Saldo a pagar</TableHead>
                 <TableHead className={cn(TH, 'px-6 text-right')}>Ação</TableHead>
               </TableRow>
             </TableHeader>
@@ -277,6 +282,9 @@ export default function ComplementosPage() {
                                 {nomeCompetencia(mes)} não está fechado no sistema: o valor já pago foi presumido pelos valores em vigor no 1º dia do mês. Confira com o que foi realmente lançado.
                               </p>
                             )}
+                            <p className="mb-2 text-xs font-bold text-zinc-700">
+                              Aumentos + {moeda(p.aumentos)} · Reduções − {moeda(Math.abs(p.reducoesValor))} · Saldo {p.total >= 0 ? '+ ' : '− '}{moeda(Math.abs(p.total))}
+                            </p>
                             <ul className="space-y-1 text-xs max-w-xl">
                               {p.dif.map((d) => (
                                 <li key={d.data} className="flex justify-between gap-4">
@@ -300,9 +308,9 @@ export default function ComplementosPage() {
       {reducoes.length > 0 && (
         <Card className="border-none shadow-sm overflow-hidden bg-white/50">
           <div className="px-6 py-3 border-b border-amber-100 bg-amber-50">
-            <h3 className="text-sm font-black uppercase tracking-tight text-amber-900">Reduções de valor: descontar na próxima folha</h3>
+            <h3 className="text-sm font-black uppercase tracking-tight text-amber-900">Saldo negativo: descontar na próxima folha</h3>
             <p className="text-[11px] text-amber-800">
-              O valor diário diminuiu depois do pagamento, então o promotor recebeu a mais. Isso não vira acerto imediato: entra como desconto (DIF - AJC negativo) no fechamento
+              As reduções de valor superaram os aumentos, então o promotor recebeu a mais. Isso não vira acerto imediato: o saldo entra como desconto (DIF - AJC negativo) no fechamento
               do mês seguinte, e o Cálculo do Mês avisa e aplica com um clique.
             </p>
           </div>
@@ -314,13 +322,16 @@ export default function ComplementosPage() {
                     <p className="text-sm font-bold text-zinc-900">{p.nome}{ehTemporario(p.empresa) && <BadgeTmp />}</p>
                     <p className="text-[10px] text-zinc-500">MAT: {p.matricula} · {p.reducao.length} {p.reducao.length === 1 ? 'dia' : 'dias'}</p>
                   </div>
-                  <p className="text-sm font-black tabular-nums text-rose-600">− {moeda(Math.abs(p.totalReducao))}</p>
+                  <div className="text-right">
+                    <p className="text-sm font-black tabular-nums text-rose-600">− {moeda(Math.abs(p.totalReducao))}</p>
+                    <p className="text-[10px] text-zinc-500">Aumentos + {moeda(p.aumentos)} · Reduções − {moeda(Math.abs(p.reducoesValor))}</p>
+                  </div>
                 </div>
                 <ul className="mt-2 space-y-1 text-xs max-w-xl">
                   {p.reducao.map((d) => (
                     <li key={d.data} className="flex justify-between gap-4 text-zinc-600">
                       <span><span className="tabular-nums">{formatarData(d.data)}</span> · {DIAS_SEMANA[diaSemana(d.data)]}</span>
-                      <span className="tabular-nums">{moeda(d.pago)} → {moeda(d.novo)} <strong className="ml-2 text-rose-600">− {moeda(Math.abs(d.diferenca))}</strong></span>
+                      <span className="tabular-nums">{moeda(d.pago)} → {moeda(d.novo)} <strong className={cn('ml-2', d.diferenca < 0 ? 'text-rose-600' : 'text-emerald-700')}>{d.diferenca < 0 ? '− ' : '+ '}{moeda(Math.abs(d.diferenca))}</strong></span>
                     </li>
                   ))}
                 </ul>

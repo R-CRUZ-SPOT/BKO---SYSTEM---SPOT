@@ -580,6 +580,34 @@ export function diferencasNoMes(colab: ColaboradorCalc, entrada: EntradaCalculo,
   return lista;
 }
 
+/** Aumentos, reduções (negativo) e saldo de uma lista de diferenças de valor. */
+export function saldoDiferencas(lista: DiferencaDia[]): { aumentos: number; reducoes: number; saldo: number } {
+  const aumentos = r2(lista.filter((d) => d.diferenca > 0).reduce((s, d) => s + d.diferenca, 0));
+  const reducoes = r2(lista.filter((d) => d.diferenca < 0).reduce((s, d) => s + d.diferenca, 0));
+  return { aumentos, reducoes, saldo: r2(aumentos + reducoes) };
+}
+
+/**
+ * Diferenças que vão para a folha (DIF - AJC): em cada mês, aumentos e reduções se compensam; só entra o mês cujo
+ * saldo é negativo (o promotor recebeu a mais). Saldo positivo é pago na hora, na aba Acertos.
+ */
+export function diferencasParaFolha(lista: DiferencaDia[]): DiferencaDia[] {
+  const porMes = new Map<string, DiferencaDia[]>();
+  for (const d of lista) {
+    const mes = d.data.slice(0, 7);
+    porMes.set(mes, [...(porMes.get(mes) ?? []), d]);
+  }
+  return [...porMes.values()]
+    .filter((l) => saldoDiferencas(l).saldo < 0)
+    .flat()
+    .sort((a, b) => a.data.localeCompare(b.data));
+}
+
+/** Há diferença de valor no mês com saldo positivo (ou zero): deve ser acertado/pago na hora. */
+export function temAcertoPendente(lista: DiferencaDia[]): boolean {
+  return lista.length > 0 && saldoDiferencas(lista).saldo >= 0;
+}
+
 /** Primeira competência da cadeia de cálculo, ou null se a competência pode ser calculada direto. */
 function inicioDaCadeia(entrada: EntradaCalculo): string | null {
   if (entrada.ultimaFechada === undefined) return null;

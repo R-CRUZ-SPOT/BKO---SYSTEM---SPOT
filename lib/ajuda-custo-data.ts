@@ -257,6 +257,43 @@ export async function aplicarPracasDaPlanilha(linhas: LinhaPracaPlanilha[]): Pro
   return { vinculados: registros.length, pracasNovas: plano.novas.length, semDados: plano.semDados, semCadastro: plano.semCadastro };
 }
 
+export interface AcertoPosFechamento {
+  colaborador_id: string;
+  nome: string;
+  matricula: string;
+  valor: number;
+  /** ISO do último acerto registrado */
+  em: string;
+}
+
+/**
+ * Acertos imediatos (saldo positivo de mudança de valor) registrados depois do fechamento do mês: entram na folha
+ * do mês como "acerto após o fechamento". Só valem os registrados depois do fechamento, para não contar em dobro
+ * quando o mês é reaberto e fechado de novo (o valor novo já está no cálculo).
+ */
+export async function carregarAcertosPosFechamento(competencia: string, fechadoEm: string): Promise<AcertoPosFechamento[]> {
+  const { data, error } = await supabase
+    .from('ajuda_custo_complementos')
+    .select('colaborador_id, valor, created_at, colaboradores(nome, matricula)')
+    .eq('competencia', competencia)
+    .gt('created_at', fechadoEm);
+  if (error) return []; // tabela ainda inexistente ou sem permissão: simplesmente não mostra
+  const mapa = new Map<string, AcertoPosFechamento>();
+  (data ?? []).forEach((c: any) => {
+    const valor = Number(c.valor);
+    if (!(valor > 0)) return;
+    const atual = mapa.get(c.colaborador_id);
+    mapa.set(c.colaborador_id, {
+      colaborador_id: c.colaborador_id,
+      nome: c.colaboradores?.nome ?? '—',
+      matricula: c.colaboradores?.matricula ?? '',
+      valor: Math.round(((atual?.valor ?? 0) + valor + Number.EPSILON) * 100) / 100,
+      em: atual && atual.em > c.created_at ? atual.em : c.created_at,
+    });
+  });
+  return [...mapa.values()];
+}
+
 export interface DescontoPendente {
   colaborador_id: string;
   nome: string;

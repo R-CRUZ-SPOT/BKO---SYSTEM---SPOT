@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/lib/auth-context';
-import { calcularCompetencia, competenciaPadrao, diferencasDeValor, diferencasNoMes, moeda, nomeCompetencia, r2, somarMeses, verificarFechamento } from '@/lib/ajuda-custo';
+import { calcularCompetencia, competenciaPadrao, diferencasDeValor, diferencasNoMes, diferencasParaFolha, temAcertoPendente, moeda, nomeCompetencia, r2, somarMeses, verificarFechamento } from '@/lib/ajuda-custo';
 import { supabase } from '@/lib/supabase';
 import { avisarAcertosMudaram } from '@/hooks/use-acertos-pendentes';
 import { carregarEntrada, fecharLancamento, type CarregamentoCalculo } from '@/lib/ajuda-custo-data';
@@ -54,8 +54,8 @@ export default function CalculoPage() {
     if (!dados || dados.lancamento) return [];
     return comTarifa
       .filter((r) => (dados.avulsos.get(r.colaborador.id)?.dif_dias.length ?? 0) === 0)
-      // só reduções: acréscimos do mês vigente são pagos na hora, na aba Acertos
-      .map((r) => ({ r, dif: diferencasDeValor(r.colaborador, dados.entrada).filter((d) => d.diferenca < 0) }))
+      // só meses com saldo negativo (aumentos e reduções se compensam): saldo positivo é pago na hora, na aba Acertos
+      .map((r) => ({ r, dif: diferencasParaFolha(diferencasDeValor(r.colaborador, dados.entrada)) }))
       .filter((x) => x.dif.length > 0)
       .map((x) => ({ ...x, total: r2(x.dif.reduce((s, d) => s + d.diferenca, 0)) }));
   }, [dados, comTarifa]);
@@ -65,7 +65,7 @@ export default function CalculoPage() {
   const acrescimosAgora = useMemo(() => {
     if (!dados || dados.lancamento) return [];
     const mesVigente = somarMeses(competencia, -1);
-    return comTarifa.filter((r) => diferencasNoMes(r.colaborador, dados.entrada, mesVigente).some((d) => d.diferenca > 0));
+    return comTarifa.filter((r) => temAcertoPendente(diferencasNoMes(r.colaborador, dados.entrada, mesVigente)));
   }, [dados, comTarifa, competencia]);
 
   // DIF - AJC calculado (aplicado antes) que não bate mais com os valores cadastrados, ex.: a vigência foi removida/alterada
@@ -75,7 +75,7 @@ export default function CalculoPage() {
       .map((r) => ({ r, av: dados.avulsos.get(r.colaborador.id) }))
       .filter((x): x is { r: typeof x.r; av: NonNullable<typeof x.av> } => !!x.av && x.av.dif_dias.length > 0)
       .map((x) => {
-        const atuais = new Map(diferencasDeValor(x.r.colaborador, dados.entrada).map((d) => [d.data, d.novo]));
+        const atuais = new Map(diferencasParaFolha(diferencasDeValor(x.r.colaborador, dados.entrada)).map((d) => [d.data, d.novo]));
         const igual = x.av.dif_dias.length === atuais.size && x.av.dif_dias.every((d) => atuais.get(d.data) === d.novo);
         return { ...x, igual };
       })
@@ -93,7 +93,7 @@ export default function CalculoPage() {
     for (const { r, av } of difDesatualizado) {
       const antigoCalculado = r2(av.dif_dias.reduce((s, d) => s + (d.novo - d.pago), 0));
       const manual = r2(av.dif_ajc - antigoCalculado);
-      const novas = diferencasDeValor(r.colaborador, dados.entrada);
+      const novas = diferencasParaFolha(diferencasDeValor(r.colaborador, dados.entrada));
       const novoTotal = r2(novas.reduce((s, d) => s + d.diferenca, 0));
       const dif = r2(manual + novoTotal);
       const vazio = dif === 0 && av.internet === 0 && av.alimentacao === 0 && !av.observacao;
@@ -258,7 +258,7 @@ export default function CalculoPage() {
           {!dados.avulsosIndisponiveis && diferencasPendentes.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-3 text-xs text-sky-900">
               <p>
-                <strong>{diferencasPendentes.length} promotor(es)</strong> com redução de valor em dias já pagos (o valor diário diminuiu depois do pagamento). A redução entra como desconto
+                <strong>{diferencasPendentes.length} promotor(es)</strong> com saldo negativo na mudança de valor de dias já pagos (as reduções superam os aumentos). O saldo entra como desconto
                 (DIF - AJC negativo) nesta folha. Total: <strong>{moeda(r2(diferencasPendentes.reduce((s, x) => s + x.total, 0)))}</strong>.
               </p>
               <Button size="sm" disabled={aplicandoDif} onClick={aplicarDiferencas} className="rounded-xl bg-sky-700 hover:bg-sky-800">
@@ -280,7 +280,7 @@ export default function CalculoPage() {
               promotor={{ id: resultadoEdicao.colaborador.id, nome: resultadoEdicao.colaborador.nome, matricula: resultadoEdicao.colaborador.matricula ?? '' }}
               competencia={competencia}
               avulso={dados.avulsos.get(resultadoEdicao.colaborador.id)}
-              diferencas={diferencasDeValor(resultadoEdicao.colaborador, dados.entrada)}
+              diferencas={diferencasParaFolha(diferencasDeValor(resultadoEdicao.colaborador, dados.entrada))}
               onFechar={() => setEditandoAvulsos(null)}
               onSalvo={() => {
                 setEditandoAvulsos(null);
