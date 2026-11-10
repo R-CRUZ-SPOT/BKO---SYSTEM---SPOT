@@ -27,6 +27,11 @@ interface Loja {
   rede: string;
   nomFantasia: string;
   logradouro: string;
+  manual?: boolean;
+}
+
+function lojaLabel(l: Loja) {
+  return l.rede ? `${l.rede} - ${l.nomFantasia}` : l.nomFantasia;
 }
 
 function dedupeLojas(rows: RoteiroEntry[]): Loja[] {
@@ -163,6 +168,10 @@ export default function CartasPage() {
   const [lojasVinculadas, setLojasVinculadas] = useState<Loja[]>([]);
   const [lojasExtras, setLojasExtras] = useState<Loja[]>([]);
   const [lojaSearchTerm, setLojaSearchTerm] = useState('');
+  const [manualAberto, setManualAberto] = useState(false);
+  const [manualRede, setManualRede] = useState('');
+  const [manualNome, setManualNome] = useState('');
+  const [manualEndereco, setManualEndereco] = useState('');
   const [cartaGerada, setCartaGerada] = useState(false);
 
   const [modo, setModo] = useState<'individual' | 'massa'>('individual');
@@ -227,6 +236,7 @@ export default function CartasPage() {
       setSelectedLojaIds([]);
       setLojasExtras([]);
       setLojaSearchTerm('');
+      setManualAberto(false);
       setCartaGerada(false);
     } else {
       setLojasVinculadas([]);
@@ -253,6 +263,28 @@ export default function CartasPage() {
     setLojasExtras(prev => [...prev, loja]);
     setSelectedLojaIds(prev => [...prev, loja.id]);
     setLojaSearchTerm('');
+  };
+
+  const handleAddManualLoja = () => {
+    const nome = manualNome.trim();
+    const endereco = manualEndereco.trim();
+    if (!nome || !endereco) {
+      toast.error('Informe o nome e o endereço da loja.');
+      return;
+    }
+    const loja: Loja = {
+      id: `manual-${Date.now()}`,
+      rede: manualRede.trim(),
+      nomFantasia: nome,
+      logradouro: endereco,
+      manual: true,
+    };
+    handleAddExtraLoja(loja);
+    setManualRede('');
+    setManualNome('');
+    setManualEndereco('');
+    setManualAberto(false);
+    setCartaGerada(false);
   };
 
   const handleRemoveExtraLoja = (lojaId: string) => {
@@ -514,12 +546,12 @@ export default function CartasPage() {
                                 className="w-4 h-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
                               />
                               <label htmlFor={`loja-${l.id}`} className="text-sm font-medium text-zinc-700 cursor-pointer flex-1 min-w-0 line-clamp-2">
-                                {l.rede} - {l.nomFantasia}
+                                {lojaLabel(l)}
                               </label>
                               {isExtra && (
                                 <>
                                   <span className="text-[9px] text-amber-600 font-bold uppercase bg-amber-50 px-1.5 py-0.5 rounded shrink-0">
-                                    Fora da base
+                                    {l.manual ? 'Manual' : 'Fora da base'}
                                   </span>
                                   <button
                                     type="button"
@@ -571,11 +603,65 @@ export default function CartasPage() {
                                 onClick={() => handleAddExtraLoja(l)}
                                 className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-emerald-50 transition-colors border-b border-zinc-100 last:border-b-0"
                               >
-                                <span className="text-xs font-medium text-zinc-700 line-clamp-2 min-w-0">{l.rede} - {l.nomFantasia}</span>
+                                <span className="text-xs font-medium text-zinc-700 line-clamp-2 min-w-0">{lojaLabel(l)}</span>
                                 <Plus className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                               </button>
                             ))
                           )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {selectedColaboradorId && (
+                    <div className="mt-3">
+                      {!manualAberto ? (
+                        <button
+                          type="button"
+                          onClick={() => setManualAberto(true)}
+                          className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Informar loja manualmente
+                        </button>
+                      ) : (
+                        <div className="border border-zinc-200 rounded-xl p-3 bg-white space-y-2">
+                          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-tighter">
+                            Loja manual (não consta no roteiro)
+                          </p>
+                          <input
+                            type="text"
+                            value={manualRede}
+                            onChange={(e) => setManualRede(e.target.value)}
+                            placeholder="Rede (opcional)"
+                            className="w-full h-9 px-3 bg-white border border-zinc-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                          />
+                          <input
+                            type="text"
+                            value={manualNome}
+                            onChange={(e) => setManualNome(e.target.value)}
+                            placeholder="Nome da loja *"
+                            className="w-full h-9 px-3 bg-white border border-zinc-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                          />
+                          <input
+                            type="text"
+                            value={manualEndereco}
+                            onChange={(e) => setManualEndereco(e.target.value)}
+                            placeholder="Endereço *"
+                            className="w-full h-9 px-3 bg-white border border-zinc-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                          />
+                          <div className="flex justify-end gap-2 pt-1">
+                            <Button type="button" variant="outline" size="sm" onClick={() => setManualAberto(false)}>
+                              Cancelar
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={handleAddManualLoja}
+                              className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold"
+                            >
+                              Adicionar loja
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
