@@ -270,7 +270,7 @@ export default function AniversariantesPage() {
     const codigo = String(voucher.codigo || 'N/A').replace(/^\s*c[óo]digo\s*:?\s*/i, '').replace(/senha\s*:/i, 'senha:').trim();
     const valor = formatarValorVoucher(voucher.valor);
     const produto = valor ? `${voucher.produto} no valor de ${valor}` : voucher.produto;
-    return `Olá ${nome}! Feliz aniversário! \u{1F382} Aqui está seu presente da EPSON / SPOT: seu voucher ${produto}, código: ${codigo}. Aproveite seu dia!`;
+    return `Olá ${nome}! Feliz aniversário! \u{1F382} Aqui está seu presente da SPOT / EPSON: seu voucher ${produto}, código: ${codigo}. Aproveite seu dia!`;
   };
 
   const checkEligibility = (admissionDate: string, birthDate: string, vouchers: any[] = []) => {
