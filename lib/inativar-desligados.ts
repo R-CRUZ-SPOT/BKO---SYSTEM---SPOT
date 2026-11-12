@@ -4,7 +4,7 @@ import { dataCache } from '@/lib/data-cache';
 /**
  * Inativa os promotores cujo desligamento (ocorrência da Ajuda de Custo) já começou: do primeiro dia até o último,
  * o promotor ainda ativo passa a inativo, com data de inativação igual ao primeiro dia. Segue o mesmo efeito da
- * inativação manual (libera aparelhos e linhas e encerra os vínculos). Devolve os nomes dos inativados.
+ * inativação manual: aparelhos e linhas continuam vinculados e as telas de ativos sinalizam "promotor desligado". Devolve os nomes dos inativados.
  * Só vale para desligamentos em curso: quem foi reativado depois que o período terminou não é inativado de novo.
  */
 export async function inativarDesligadosVigentes(): Promise<string[]> {
@@ -36,9 +36,6 @@ export async function inativarDesligadosVigentes(): Promise<string[]> {
       const inicio = inicioPorId.get(c.id)!;
       const { error: erroUpdate } = await supabase.from('colaboradores').update({ status: 'inativo', data_inativacao: `${inicio}T00:00:00` }).eq('id', c.id);
       if (erroUpdate) throw erroUpdate;
-      await supabase.from('aparelhos').update({ colaborador_id: null }).eq('colaborador_id', c.id);
-      await supabase.from('linhas').update({ colaborador_id: null }).eq('colaborador_id', c.id);
-      await supabase.from('vinculos').update({ data_fim: `${inicio}T00:00:00` }).eq('colaborador_id', c.id).is('data_fim', null);
     }
     dataCache.invalidate('colaboradores');
     dataCache.invalidate('dashboard_stats');

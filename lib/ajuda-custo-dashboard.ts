@@ -8,6 +8,11 @@ export interface ItemDash {
   matricula: string;
   praca: string | null;
   supervisor?: string | null;
+  /** tipo de contratação (EMPRESA) e salário, para a análise ajuda x salário */
+  empresa?: string | null;
+  salario?: number | null;
+  /** mês com ausência (férias, atestado, falta, desligamento): o bruto fica abaixo do cheio */
+  parcial?: boolean;
   bruto: number;
   descontos: number;
   valor_pagar: number;

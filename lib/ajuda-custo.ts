@@ -54,6 +54,8 @@ export interface ColaboradorCalc {
   empresa?: string | null;
   /** supervisor do promotor (cadastro em Gestão de Pessoas / planilha de Roteiro) */
   supervisor?: string | null;
+  /** salário (planilha de Gestão de Pessoas), para mostrar o percentual da ajuda de custo */
+  salario?: number | null;
 }
 
 /** Feriado cadastrado pelo usuário. praca_id nulo = vale para todos. recorrente = repete todo ano (a partir do ano de `data`). */
@@ -202,7 +204,7 @@ export interface ResultadoColaborador {
 export const ehTemporario = (empresa?: string | null) => /^\s*TMP\b/i.test(empresa ?? '');
 
 /** Contratação CLT ou MKT (coluna EMPRESA). */
-export const ehCltOuMkt = (empresa?: string | null) => /^s*(CLT|MKT)/i.test(empresa ?? '');
+export const ehCltOuMkt = (empresa?: string | null) => /^\s*(CLT|MKT)\b/i.test(empresa ?? '');
 
 export const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 

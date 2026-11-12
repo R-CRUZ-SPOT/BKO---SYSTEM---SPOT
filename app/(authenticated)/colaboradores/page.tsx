@@ -16,6 +16,7 @@ import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { aplicarPracasDaPlanilha } from '@/lib/ajuda-custo-data';
 import { dataCache } from '@/lib/data-cache';
+import { parseSalario } from '@/lib/salario';
 import { ImportarSupervisores } from '@/components/colaboradores/importar-supervisores';
 import { normalizarSupervisor } from '@/lib/supervisor-import';
 import { separarPraca } from '@/lib/ajuda-custo';
@@ -314,14 +315,7 @@ export default function ColaboradoresPage() {
 
       if (error) throw error;
 
-      if (newStatus === 'inativo') {
-        await supabase.from('aparelhos').update({ colaborador_id: null }).in('colaborador_id', ids);
-        await supabase.from('linhas').update({ colaborador_id: null }).in('colaborador_id', ids);
-        await supabase.from('vinculos')
-          .update({ data_fim: new Date().toISOString() })
-          .in('colaborador_id', ids)
-          .is('data_fim', null);
-      }
+      // Aparelhos e linhas continuam vinculados: as telas de ativos sinalizam "promotor desligado" até serem recolhidos.
 
       toast.success(`${ids.length} colaborador(es) ${newStatus === 'ativo' ? 'ativado(s)' : 'inativado(s)'} com sucesso!`);
       setSelectedIds(new Set());
@@ -430,6 +424,8 @@ export default function ColaboradoresPage() {
         const hasJob = hasField(['JOB']);
         const hasCargo = hasField(['CARGO']);
         const hasEmpresa = hasField(['EMPRESA']);
+        // coluna de salário: aceita SALARIO, SALÁRIO, SALARIO BASE, VLR SALARIO etc.
+        const salarioHeader = headers.find((h) => /SAL[AÁ]RIO/.test(h));
         const hasUf = hasField(['UF', 'ESTADO', 'DES_UF']);
         const hasCidade = hasField(['CIDADE', 'MUNICIPIO', 'MUNICÍPIO', 'DES_CIDADE', 'NOM_CIDADE']);
         const hasNascimento = hasField(['NASCIMENTO', 'DATA_NASCIMENTO', 'DATA NASCIMENTO', 'DATA DE NASCIMENTO']);
@@ -460,6 +456,7 @@ export default function ColaboradoresPage() {
           obj._demitido = isDemitidoRow(row);
           obj._dataRescisao = parseImportDate(getColValue(row, ['DATA RESCISAO', 'DATA RESCISÃO', 'DATA_RESCISAO']));
           // UF e cidade definem a praça do promotor (Ajuda de Custo); não são colunas de colaboradores
+          obj._salario = salarioHeader ? parseSalario(getColValue(row, [salarioHeader])) : null;
           obj._uf = getColValue(row, ['UF', 'ESTADO', 'DES_UF'])?.toString().trim() || null;
           obj._cidade = getColValue(row, ['CIDADE', 'MUNICIPIO', 'MUNICÍPIO', 'DES_CIDADE', 'NOM_CIDADE'])?.toString().trim() || null;
 
@@ -522,7 +519,7 @@ export default function ColaboradoresPage() {
         });
 
         // Demitidos nunca são cadastrados: só os demais seguem para upsert/reatribuição
-        const stripMeta = ({ _demitido, _dataRescisao, _uf, _cidade, ...clean }: any) => clean;
+        const stripMeta = ({ _demitido, _dataRescisao, _uf, _cidade, _salario, ...clean }: any) => clean;
         const activeRows = uniqueFormattedData.filter((row: any) => !row._demitido);
         const demitidoRows = uniqueFormattedData.filter((row: any) => row._demitido);
 
@@ -564,6 +561,17 @@ export default function ColaboradoresPage() {
           if (error) reassignErrors++;
         }
         const reassignedCount = rowsToReassign.length - reassignErrors;
+
+        // Salário (Ajuda de Custo): gravado à parte, para a importação não falhar se a coluna ainda não existir no banco
+        let salarioMsg = '';
+        if (salarioHeader) {
+          const comSalario = activeRows.filter((row: any) => row._salario).map((row: any) => ({ matricula: row.matricula, nome: row.nome, salario: row._salario }));
+          const { error: erroSalario } = await supabase.from('colaboradores').upsert(comSalario.length ? comSalario : [], { onConflict: 'matricula' });
+          salarioMsg = erroSalario
+            ? ` Não foi possível gravar os salários: ${erroSalario.message} (execute scripts/colaboradores-salario.sql no Supabase).`
+            : ` Salário atualizado para ${comSalario.length} colaborador(es).`;
+          if (erroSalario) pracaFalhou = true;
+        }
 
         // Praça do promotor a partir de UF e Cidade da planilha (Ajuda de Custo)
         let pracaMsg = '';
@@ -651,6 +659,7 @@ export default function ColaboradoresPage() {
               ? ` ${demitidoRows.length} promotor(es) demitido(s) na planilha: ${inactivated.length} inativado(s) no sistema (vínculos mantidos) e ${demitidosIgnorados} ignorado(s) (não cadastrados ou já inativos).`
               : '') +
             (inactivateErrors > 0 ? ` ${inactivateErrors} inativação(ões) falharam.` : '') +
+            salarioMsg +
             pracaMsg,
           details: details.length > 0 ? details : undefined
         });
@@ -688,19 +697,7 @@ export default function ColaboradoresPage() {
 
       if (error) throw error;
 
-      if (newStatus === 'inativo') {
-        // Desvincular aparelhos
-        await supabase.from('aparelhos').update({ colaborador_id: null }).eq('colaborador_id', colab.id);
-        
-        // Desvincular linhas
-        await supabase.from('linhas').update({ colaborador_id: null }).eq('colaborador_id', colab.id);
-
-        // Atualizar histórico de vínculos fechando-os
-        await supabase.from('vinculos')
-          .update({ data_fim: new Date().toISOString() })
-          .eq('colaborador_id', colab.id)
-          .is('data_fim', null);
-      }
+      // Aparelhos e linhas continuam vinculados: as telas de ativos sinalizam "promotor desligado" até serem recolhidos.
 
       toast.success(`Colaborador ${newStatus === 'ativo' ? 'ativado' : 'inativado'} com sucesso!`);
       dataCache.invalidate('colaboradores');

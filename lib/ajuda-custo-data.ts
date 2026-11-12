@@ -60,6 +60,16 @@ export async function carregarEmpresas(): Promise<Map<string, string | null>> {
   }
 }
 
+/** colaborador -> salário (planilha de Gestão de Pessoas). Se a coluna ainda não existe, devolve vazio. */
+export async function carregarSalarios(): Promise<Map<string, number | null>> {
+  try {
+    const linhas = await buscarTudo<any>((from, to) => supabase.from('colaboradores').select('id, salario').order('id').range(from, to));
+    return new Map(linhas.map((c: any) => [c.id as string, c.salario === null || c.salario === undefined ? null : Number(c.salario)]));
+  } catch {
+    return new Map();
+  }
+}
+
 /** colaborador -> supervisor. Se as colunas ainda não existem no banco, devolve vazio (nada quebra). */
 export async function carregarSupervisores(): Promise<Map<string, string | null>> {
   try {
@@ -136,8 +146,8 @@ export async function carregarEntrada(competencia: string): Promise<Carregamento
       .eq('status', 'ativo')
       .order('nome');
     if (error) throw error;
-    const [empresas, supervisores] = await Promise.all([carregarEmpresas(), carregarSupervisores()]);
-    colaboradores = (data ?? []).map((c: any) => ({ ...c, empresa: empresas.get(c.id) ?? null, supervisor: supervisores.get(c.id) ?? null }));
+    const [empresas, supervisores, salarios] = await Promise.all([carregarEmpresas(), carregarSupervisores(), carregarSalarios()]);
+    colaboradores = (data ?? []).map((c: any) => ({ ...c, empresa: empresas.get(c.id) ?? null, supervisor: supervisores.get(c.id) ?? null, salario: salarios.get(c.id) ?? null }));
   }
 
   const ocorrencias = await buscarTudo<any>((from, to) =>
@@ -531,6 +541,9 @@ async function carregarPreviaDashboard(): Promise<DadosDashboard> {
       matricula: r.colaborador.matricula ?? '',
       praca: (pracaId && nomePraca.get(pracaId)) || null,
       supervisor: r.colaborador.supervisor ?? null,
+      empresa: r.colaborador.empresa ?? null,
+      salario: r.colaborador.salario ?? null,
+      parcial: r.dias.some((d) => !d.pago && !d.motivo?.startsWith('Feriado')),
       bruto: r.bruto,
       descontos: r.totalDescontos,
       valor_pagar: valorTotalLancar(r.valorPagar, av),
@@ -604,6 +617,7 @@ export async function carregarDashboard(meses: number): Promise<DadosDashboard> 
     saldo_devedor: Number(i.saldo_devedor),
     dias_trabalhados: i.dias_trabalhados,
     listaDescontos: (i.detalhes?.descontos ?? []).map((d: any) => ({ data: d.data, valor: Number(d.valor), motivo: String(d.motivo ?? '') })),
+    parcial: (i.detalhes?.dias_excluidos ?? []).some((d: any) => !String(d.motivo ?? '').startsWith('Feriado')),
   }));
 
   // ocorrências do intervalo dos lançamentos até hoje (para "afastados hoje" sempre há dados)
@@ -613,8 +627,12 @@ export async function carregarDashboard(meses: number): Promise<DadosDashboard> 
   );
   const nomes = new Map<string, string>(ocorrencias.map((o: any) => [o.colaborador_id as string, (o.colaboradores?.nome ?? '—') as string]));
 
-  const supervisores = await carregarSupervisores();
-  itens.forEach((i) => (i.supervisor = supervisores.get(i.colaborador_id) ?? null));
+  const [supervisores, empresas, salarios] = await Promise.all([carregarSupervisores(), carregarEmpresas(), carregarSalarios()]);
+  itens.forEach((i) => {
+    i.supervisor = supervisores.get(i.colaborador_id) ?? null;
+    i.empresa = empresas.get(i.colaborador_id) ?? null;
+    i.salario = salarios.get(i.colaborador_id) ?? null;
+  });
 
   return { itens, ocorrencias: ocorrencias as OcorrenciaDash[], competencias, nomes };
 }

@@ -16,6 +16,7 @@ import {
   resumirPorMes,
   variacao,
 } from '@/lib/ajuda-custo-dashboard';
+import { AjudaSobreSalario } from '@/components/ajuda-custo/ajuda-salario';
 import { BarrasEmpilhadas, BarrasHorizontais, CartaoGrafico, COR, COR_TIPO, Indicador, LinhaEvolucao, rotuloMes } from '@/components/ajuda-custo/graficos';
 import { cn } from '@/lib/utils';
 
@@ -185,6 +186,8 @@ export default function DashboardPage() {
           <BarrasEmpilhadas meses={analise.ausencias} />
         </CartaoGrafico>
       </div>
+
+      <AjudaSobreSalario itens={dados.itens.filter((i) => i.competencia === ultima.competencia)} competencia={ultima.competencia} />
 
       {linhasSupervisor.some((l) => l.rotulo !== 'Sem supervisor') && (
         <CartaoGrafico titulo="Valor lançado por supervisor" subtitulo={mesUlt}>

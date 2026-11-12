@@ -9,7 +9,11 @@ import { Input } from '@/components/ui/input';
 import { BadgeTmp } from './badge-tmp';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { type Avulso, DIAS_SEMANA, ehCltOuMkt, ehTemporario, type ResultadoColaborador, diaSemana, formatarData, moeda, nomeCompetencia, r2, saldoDevedorFinal, valorTotalLancar } from '@/lib/ajuda-custo';
+import { FAIXAS_SALARIO, ROTULO_FAIXA, faixaDoPercentual, percentualDoSalario } from '@/lib/salario';
 import { cn } from '@/lib/utils';
+
+/** "7,5%" (uma casa decimal) ou "—" quando não há salário. */
+const pct = (v: number | null) => (v === null ? '—' : `${v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`);
 
 export interface LinhaLancamento {
   id: string;
@@ -19,6 +23,8 @@ export interface LinhaLancamento {
   empresa: string | null;
   /** supervisor do promotor */
   supervisor: string | null;
+  /** salário do promotor (planilha de Gestão de Pessoas) */
+  salario: number | null;
   dias: number;
   uteis: number;
   descontados: number;
@@ -55,6 +61,7 @@ export function linhaDeResultado(r: ResultadoColaborador, av?: Avulso): LinhaLan
     matricula: r.colaborador.matricula ?? '',
     empresa: r.colaborador.empresa ?? null,
     supervisor: r.colaborador.supervisor ?? null,
+    salario: r.colaborador.salario ?? null,
     dias: r.diasTrabalhados,
     uteis: r.dias.filter((d) => !d.motivo?.startsWith('Feriado')).length,
     descontados: r.descontos.length,
@@ -89,6 +96,7 @@ export function linhaDeItemSalvo(item: any): LinhaLancamento {
     matricula: item.colaboradores?.matricula ?? '',
     empresa: null, // preenchida depois (carregarEmpresas)
     supervisor: null, // preenchido depois (carregarSupervisores)
+    salario: null, // preenchido depois (carregarSalarios)
     dias: item.dias_trabalhados,
     uteis: item.dias_trabalhados + (det.dias_excluidos ?? []).filter((d: any) => !String(d.motivo ?? '').startsWith('Feriado')).length,
     descontados: (det.descontos ?? []).length,
@@ -122,7 +130,7 @@ export function comAcertosPosFechamento(linhas: LinhaLancamento[], acertos: { co
       resultado[i] = { ...resultado[i], valorPagar: r2(resultado[i].valorPagar + a.valor), acertoApos: { valor: a.valor, em: a.em } };
     } else {
       resultado.push({
-        id: a.colaborador_id, nome: a.nome, matricula: a.matricula, empresa: null, supervisor: null, dias: 0, uteis: 0, descontados: 0, bruto: 0, descontos: 0, saldoAnterior: 0,
+        id: a.colaborador_id, nome: a.nome, matricula: a.matricula, empresa: null, supervisor: null, salario: null, dias: 0, uteis: 0, descontados: 0, bruto: 0, descontos: 0, saldoAnterior: 0,
         valorAjuda: 0, internet: 0, internetRecorrente: false, difAjc: 0, alimentacao: 0, observacaoAvulso: null, difDiasCount: 0, valorPagar: a.valor, saldoDevedor: 0,
         porDiaSemana: [], pagos: [], excluidos: [], listaDescontos: [], pagoApos: null, acertoApos: { valor: a.valor, em: a.em },
       });
@@ -134,6 +142,12 @@ export function comAcertosPosFechamento(linhas: LinhaLancamento[], acertos: { co
 const TH = 'text-[10px] font-bold uppercase tracking-wide text-zinc-500';
 const SEM_EMPRESA = '__sem__';
 const SEM_SUP = '__sem_sup__';
+const PERSONALIZADA = 'personalizada';
+
+/** Percentual da ajuda (bruto do mês) sobre o salário; null sem salário. */
+const pctSalarioDe = (l: LinhaLancamento) => percentualDoSalario(l.bruto, l.salario);
+/** Mês com ausência (férias, atestado, falta, desligamento): o bruto fica menor e o percentual não é o cheio. */
+const mesParcial = (l: LinhaLancamento) => l.excluidos.some((d) => !String(d.motivo ?? '').startsWith('Feriado'));
 
 /** Número com 2 casas, sem o "R$" (a tabela é toda em reais; economiza largura). */
 const n2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -159,6 +173,9 @@ export function TabelaLancamento({
   const [busca, setBusca] = useState('');
   const [contratacao, setContratacao] = useState(''); // '' = todas, SEM = sem informação, ou o valor de EMPRESA
   const [supervisorSel, setSupervisorSel] = useState(''); // '' = todos, SEM_SUP = sem supervisor, ou o nome
+  const [faixaSel, setFaixaSel] = useState(''); // '' = todas, id de faixa de % do salário, 'sem' ou PERSONALIZADA
+  const [pctMin, setPctMin] = useState('');
+  const [pctMax, setPctMax] = useState('');
 
   const empresasDisponiveis = useMemo(() => [...new Set(todas.map((l) => l.empresa?.trim()).filter((e): e is string => !!e))].sort(), [todas]);
   const temSemEmpresa = todas.some((l) => !l.empresa?.trim());
@@ -170,11 +187,19 @@ export function TabelaLancamento({
     return todas.filter((l) => {
       if (q && !`${l.nome} ${l.matricula}`.toLowerCase().includes(q)) return false;
       if (supervisorSel === SEM_SUP ? !!l.supervisor?.trim() : supervisorSel ? (l.supervisor?.trim() ?? '') !== supervisorSel : false) return false;
+      if (faixaSel) {
+        const p = pctSalarioDe(l);
+        if (faixaSel === PERSONALIZADA) {
+          if (p === null) return false;
+          if (pctMin !== '' && p < Number(pctMin.replace(',', '.'))) return false;
+          if (pctMax !== '' && p >= Number(pctMax.replace(',', '.'))) return false;
+        } else if (faixaDoPercentual(p) !== faixaSel) return false;
+      }
       if (contratacao === SEM_EMPRESA) return !l.empresa?.trim();
       if (contratacao) return (l.empresa?.trim() ?? '') === contratacao;
       return true;
     });
-  }, [todas, busca, contratacao, supervisorSel]);
+  }, [todas, busca, contratacao, supervisorSel, faixaSel, pctMin, pctMax]);
   const filtrado = linhas.length !== todas.length;
 
   const totais = useMemo(
@@ -191,8 +216,9 @@ export function TabelaLancamento({
   );
 
   const mostrarParcelas = todas.some((l) => ehTemporario(l.empresa));
+  const mostrarSalario = todas.some((l) => l.salario);
   const mostrarAvulsos = !!onEditarAvulsos || todas.some((l) => l.internet || l.difAjc || l.alimentacao);
-  const nColunas = 9 + (mostrarAvulsos ? 2 : 0) + (mostrarParcelas ? 1 : 0) + (onEditarAvulsos ? 1 : 0);
+  const nColunas = 9 + (mostrarAvulsos ? 2 : 0) + (mostrarParcelas ? 1 : 0) + (mostrarSalario ? 1 : 0) + (onEditarAvulsos ? 1 : 0);
 
   function alternar(id: string) {
     setAbertos((a) => {
@@ -219,6 +245,9 @@ export function TabelaLancamento({
         Internet: l.internet,
         'DIF - AJC': l.difAjc,
         'Valor a lançar': l.valorPagar,
+        Salário: l.salario ?? '',
+        '% do bruto sobre o salário': l.salario ? Math.round(pctSalarioDe(l)! * 10) / 10 : '',
+        'Mês parcial (ausência)': mesParcial(l) ? 'sim' : '',
         '1º pagamento (TMP, 50%)': ehTemporario(l.empresa) ? dividirEmDois(l.valorPagar)[0] : '',
         '2º pagamento (TMP, 50%)': ehTemporario(l.empresa) ? dividirEmDois(l.valorPagar)[1] : '',
         'Alimentação (lançamento à parte)': l.alimentacao,
@@ -291,8 +320,29 @@ export function TabelaLancamento({
                 {temSemSupervisor && <option value={SEM_SUP}>Sem supervisor</option>}
               </select>
             )}
+            {mostrarSalario && (
+              <>
+                <select
+                  value={faixaSel}
+                  onChange={(e) => setFaixaSel(e.target.value)}
+                  title="Percentual do bruto sobre o salário"
+                  className="h-9 rounded-xl border border-input bg-white px-3 text-xs"
+                >
+                  <option value="">Todas as faixas de % do salário</option>
+                  {FAIXAS_SALARIO.map((f) => <option key={f.id} value={f.id}>{f.rotulo} do salário</option>)}
+                  <option value="sem">{ROTULO_FAIXA.sem}</option>
+                  <option value={PERSONALIZADA}>Faixa personalizada...</option>
+                </select>
+                {faixaSel === PERSONALIZADA && (
+                  <span className="flex items-center gap-1 text-xs text-zinc-500">
+                    de <Input value={pctMin} onChange={(e) => setPctMin(e.target.value)} inputMode="decimal" placeholder="mín." className="h-9 w-16 rounded-xl bg-white px-2 text-center" />
+                    até <Input value={pctMax} onChange={(e) => setPctMax(e.target.value)} inputMode="decimal" placeholder="máx." className="h-9 w-16 rounded-xl bg-white px-2 text-center" /> %
+                  </span>
+                )}
+              </>
+            )}
             {filtrado && (
-              <button type="button" onClick={() => { setBusca(''); setContratacao(''); setSupervisorSel(''); }} className="text-[11px] font-bold text-emerald-700 hover:underline">Limpar filtros</button>
+              <button type="button" onClick={() => { setBusca(''); setContratacao(''); setSupervisorSel(''); setFaixaSel(''); setPctMin(''); setPctMax(''); }} className="text-[11px] font-bold text-emerald-700 hover:underline">Limpar filtros</button>
             )}
             <p className="text-xs text-zinc-500">
               {filtrado ? `${linhas.length} de ${todas.length}` : linhas.length} {todas.length === 1 && !filtrado ? 'promotor' : 'promotores'} · {nomeCompetencia(competencia)} · valores em R$
@@ -321,6 +371,9 @@ export function TabelaLancamento({
                   </>
                 )}
                 <TableHead className={cn(TH, 'px-3 text-right')}>A lançar</TableHead>
+                {mostrarSalario && (
+                  <TableHead title="Bruto do mês (valor dos dias a pagar, antes de descontos, Internet e DIF - AJC) sobre o salário. * = mês com ausência (férias, atestado, falta), percentual menor que o cheio" className={cn(TH, 'px-1 text-right')}>% Sal.</TableHead>
+                )}
                 {mostrarParcelas && (
                   <TableHead title="Promotores temporários (TMP): valor dividido em 2 pagamentos de 50%" className={cn(TH, 'px-2 pr-3 text-right')}>50% (TMP)</TableHead>
                 )}
@@ -369,6 +422,11 @@ export function TabelaLancamento({
                           <p className="text-base font-black tabular-nums text-emerald-700">{moeda(l.valorPagar)}</p>
                           {l.saldoDevedor > 0 && <p className="text-[10px] font-bold text-amber-600">fica devendo {moeda(l.saldoDevedor)}</p>}
                         </TableCell>
+                        {mostrarSalario && (
+                          <TableCell className="px-1 text-right text-xs tabular-nums text-zinc-600 whitespace-nowrap" title={l.salario ? `Bruto ${moeda(l.bruto)} sobre salário de ${moeda(l.salario)}${mesParcial(l) ? ' (mês com ausência)' : ''}` : 'Salário não informado'}>
+                            <span className={cn(faixaDoPercentual(pctSalarioDe(l)) === '50+' && 'font-black text-rose-600')}>{pct(pctSalarioDe(l))}</span>{mesParcial(l) && l.salario ? '*' : ''}
+                          </TableCell>
+                        )}
                         {mostrarParcelas && (
                           <TableCell className="px-2 pr-3 text-right whitespace-nowrap">
                             {tmp ? (
