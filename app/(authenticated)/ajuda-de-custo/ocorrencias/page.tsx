@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { supabase } from '@/lib/supabase';
 import { TIPO_LABEL, type TipoOcorrencia, formatarData, somarDias } from '@/lib/ajuda-custo';
+import { carregarSupervisores } from '@/lib/ajuda-custo-data';
 import { inativarDesligadosVigentes } from '@/lib/inativar-desligados';
 import { avisarAcertosMudaram } from '@/hooks/use-acertos-pendentes';
 import { ColabPicker, rotuloCampo, useColaboradoresAtivos, useColaboradoresPorIds } from '@/components/ajuda-custo/colab-picker';
@@ -42,6 +43,8 @@ interface Ocorrencia {
   observacao: string | null;
 }
 
+const SEM_SUP = '__sem_sup__';
+
 const contarDias = (ini: string, fim: string) => Math.round((Date.parse(fim) - Date.parse(ini)) / 86400000) + 1;
 
 export default function OcorrenciasPage() {
@@ -50,6 +53,8 @@ export default function OcorrenciasPage() {
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState<TipoOcorrencia | 'todos'>('todos');
   const [busca, setBusca] = useState('');
+  const [supervisorSel, setSupervisorSel] = useState(''); // '' = todos, SEM_SUP = sem supervisor, ou o nome
+  const [supervisores, setSupervisores] = useState<Map<string, string | null>>(new Map());
 
   const [formAberto, setFormAberto] = useState(false);
   const [editando, setEditando] = useState<Ocorrencia | null>(null);
@@ -67,21 +72,29 @@ export default function OcorrenciasPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     carregar();
+    carregarSupervisores().then(setSupervisores);
   }, []);
 
   // nomes de todos os promotores com ocorrência, inclusive os inativados em Gestão de Pessoas
   const idsComOcorrencia = useMemo(() => [...new Set(lista.map((o) => o.colaborador_id))], [lista]);
   const nomePorId = useColaboradoresPorIds(idsComOcorrencia);
 
+  const supervisorDe = (id: string) => supervisores.get(id)?.trim() || null;
+  // supervisores dos promotores que têm ocorrência (para o filtro)
+  const supervisoresDisponiveis = useMemo(() => [...new Set(idsComOcorrencia.map((id) => supervisores.get(id)?.trim()).filter((v): v is string => !!v))].sort(), [idsComOcorrencia, supervisores]);
+  const temSemSupervisor = idsComOcorrencia.some((id) => !supervisores.get(id)?.trim());
+
   const visiveis = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return lista.filter((o) => {
       if (filtro !== 'todos' && o.tipo !== filtro) return false;
+      const sup = supervisores.get(o.colaborador_id)?.trim() || null;
+      if (supervisorSel === SEM_SUP ? !!sup : supervisorSel ? sup !== supervisorSel : false) return false;
       if (!q) return true;
       const c = nomePorId.get(o.colaborador_id);
-      return `${c?.nome ?? ''} ${c?.matricula ?? ''}`.toLowerCase().includes(q);
+      return `${c?.nome ?? ''} ${c?.matricula ?? ''} ${sup ?? ''}`.toLowerCase().includes(q);
     });
-  }, [lista, filtro, busca, nomePorId]);
+  }, [lista, filtro, busca, nomePorId, supervisorSel, supervisores]);
 
   function abrirForm(o?: Ocorrencia) {
     setEditando(o ?? null);
@@ -161,8 +174,20 @@ export default function OcorrenciasPage() {
         <CardHeader className="py-4 px-6 border-b border-zinc-100 bg-white/80 flex flex-row items-center justify-between space-y-0 gap-4">
           <div className="relative max-w-sm w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-            <Input placeholder="Pesquisar promotor..." className="pl-10 h-10 rounded-xl" value={busca} onChange={(e) => setBusca(e.target.value)} />
+            <Input placeholder="Pesquisar promotor ou supervisor..." className="pl-10 h-10 rounded-xl" value={busca} onChange={(e) => setBusca(e.target.value)} />
           </div>
+          {supervisoresDisponiveis.length > 0 && (
+            <select
+              value={supervisorSel}
+              onChange={(e) => setSupervisorSel(e.target.value)}
+              title="Supervisor do promotor"
+              className="h-10 max-w-[220px] rounded-xl border border-input bg-white px-3 text-xs"
+            >
+              <option value="">Todos os supervisores</option>
+              {supervisoresDisponiveis.map((v) => <option key={v} value={v}>{v}</option>)}
+              {temSemSupervisor && <option value={SEM_SUP}>Sem supervisor</option>}
+            </select>
+          )}
           <Button className="rounded-xl bg-emerald-600 hover:bg-emerald-700" onClick={() => abrirForm()}>
             <Plus className="w-4 h-4 mr-2" /> Nova ocorrência
           </Button>
@@ -172,6 +197,7 @@ export default function OcorrenciasPage() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="px-6 text-[11px] font-bold uppercase tracking-wider text-zinc-500">Promotor</TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Supervisor</TableHead>
                 <TableHead className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Tipo</TableHead>
                 <TableHead className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Período</TableHead>
                 <TableHead className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 text-center">Dias</TableHead>
@@ -181,9 +207,9 @@ export default function OcorrenciasPage() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-16 text-zinc-400">Carregando...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center py-16 text-zinc-400">Carregando...</TableCell></TableRow>
               ) : visiveis.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-16 text-zinc-400">Nenhuma ocorrência encontrada.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center py-16 text-zinc-400">Nenhuma ocorrência encontrada.</TableCell></TableRow>
               ) : (
                 visiveis.map((o) => {
                   const c = nomePorId.get(o.colaborador_id);
@@ -193,6 +219,7 @@ export default function OcorrenciasPage() {
                         <p className="text-sm font-bold text-zinc-900">{c?.nome ?? 'Colaborador não encontrado'}{c?.status === 'inativo' && <span className="ml-2 rounded-md border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 align-middle text-[9px] font-black uppercase tracking-wider text-zinc-500">inativo</span>}</p>
                         <p className="text-[10px] text-zinc-500">MAT: {c?.matricula}</p>
                       </TableCell>
+                      <TableCell className="text-xs text-zinc-600">{supervisorDe(o.colaborador_id) ?? <span className="text-zinc-300">—</span>}</TableCell>
                       <TableCell>
                         <span className={cn('inline-flex px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border', COR[o.tipo])}>{TIPO_LABEL[o.tipo]}</span>
                       </TableCell>
