@@ -94,7 +94,7 @@ function quebrarLinhas(ctx: CanvasRenderingContext2D, texto: string, maxW: numbe
   return linhas;
 }
 
-function loadImage(src: string, cors = false): Promise<HTMLImageElement> {
+function loadImageOnce(src: string, cors: boolean): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new window.Image();
     if (cors) img.crossOrigin = 'anonymous';
@@ -102,6 +102,20 @@ function loadImage(src: string, cors = false): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error(`Falha ao carregar imagem: ${src}`));
     img.src = src;
   });
+}
+
+// Tenta de novo (com cache burlado) para não gerar arte incompleta por falha momentânea de rede
+async function loadImage(src: string, cors = false, tentativas = 3): Promise<HTMLImageElement> {
+  let erro: unknown;
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      return await loadImageOnce(i === 0 ? src : `${src}${src.includes('?') ? '&' : '?'}retry=${i}-${Date.now()}`, cors);
+    } catch (e) {
+      erro = e;
+      await new Promise(r => setTimeout(r, 300 * (i + 1)));
+    }
+  }
+  throw erro;
 }
 
 function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -188,13 +202,10 @@ export async function gerarArteAniversario(nome: string, fotoUrl?: string | null
   }
   linhas.forEach((linha, i) => ctx.fillText(linha, FRASE_BOX.x, FRASE_BOX.y + fonte * 0.9 + i * passo));
 
-  // Assinatura original da frase (Parabéns!, Você merece o melhor!, etc.)
-  try {
-    const assinatura = await loadImage(frase.assinatura.url);
-    ctx.drawImage(assinatura, frase.assinatura.x, frase.assinatura.y);
-  } catch (e) {
-    console.warn('Assinatura da arte não pôde ser carregada.', e);
-  }
+  // Assinatura original da frase (Parabéns!, Você merece o melhor!, etc.).
+  // Sem ela a arte sai incompleta, então a falha é propagada (o botão avisa em vez de enviar pela metade).
+  const assinatura = await loadImage(frase.assinatura.url);
+  ctx.drawImage(assinatura, frase.assinatura.x, frase.assinatura.y);
 
   return new Promise((resolve, reject) =>
     canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Falha ao gerar imagem'))), 'image/png')
