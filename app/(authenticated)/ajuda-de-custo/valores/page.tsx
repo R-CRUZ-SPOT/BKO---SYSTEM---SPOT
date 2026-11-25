@@ -117,6 +117,9 @@ export default function ValoresPage() {
     setFormAberto(true);
   }
 
+  // soma dos 7 dias conforme digitado (campos vazios ou inválidos valem 0)
+  const totalSemana = Math.round(valoresForm.reduce((soma, v) => soma + (Number((v || '0').replace(',', '.')) || 0), 0) * 100) / 100;
+
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     if (!colabId) return toast.error('Selecione o promotor.');
@@ -213,15 +216,16 @@ export default function ValoresPage() {
                 {ORDEM.map((i) => (
                   <TableHead key={i} title="Valores em R$" className="px-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-500 text-right">{DIAS_SEMANA[i].slice(0, 3)}</TableHead>
                 ))}
+                <TableHead title="Soma dos 7 dias da semana" className="px-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-500 text-right">Total</TableHead>
                 <TableHead className="px-2 text-[11px] font-bold uppercase tracking-wider text-zinc-500">Vigência</TableHead>
                 <TableHead className="pl-2 pr-4 text-right text-[11px] font-bold uppercase tracking-wider text-zinc-500">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={11} className="text-center py-16 text-zinc-400">Carregando...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="text-center py-16 text-zinc-400">Carregando...</TableCell></TableRow>
               ) : atuais.length === 0 ? (
-                <TableRow><TableCell colSpan={11} className="text-center py-16 text-zinc-400">Nenhum promotor com valores cadastrados. Clique em &quot;Novo promotor&quot;.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="text-center py-16 text-zinc-400">Nenhum promotor com valores cadastrados. Clique em &quot;Novo promotor&quot;.</TableCell></TableRow>
               ) : (
                 atuais.map((l) => {
                   const c = nomePorId.get(l.colaborador_id);
@@ -237,6 +241,9 @@ export default function ValoresPage() {
                           {l.valores[i] ? l.valores[i].toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '—'}
                         </TableCell>
                       ))}
+                      <TableCell className="px-1.5 text-right text-xs tabular-nums font-black text-emerald-700">
+                        {l.valores.reduce((soma, v) => soma + v, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </TableCell>
                       <TableCell className="px-2 text-xs text-zinc-600">
                         {l.vigencia_inicio > new Date().toLocaleDateString('sv-SE') ? (
                           <span className="font-bold text-amber-600">a partir de {dataCurta(l.vigencia_inicio)}</span>
@@ -300,6 +307,10 @@ export default function ValoresPage() {
                   />
                 </div>
               ))}
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+              <span className={rotuloCampo}>Total da semana</span>
+              <span className="text-lg font-black tabular-nums text-emerald-700">{moeda(totalSemana)}</span>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="ghost" onClick={() => setFormAberto(false)}>Cancelar</Button>
