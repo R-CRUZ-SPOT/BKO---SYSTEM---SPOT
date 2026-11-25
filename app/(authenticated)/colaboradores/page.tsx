@@ -600,8 +600,10 @@ export default function ColaboradoresPage() {
 
         demitidoRows.forEach((row: any) => {
           const cpfKey = normalizeCpf(row.cpf);
-          const emailKey = normalizeEmail(row.email);
-          const existing = byMatricula.get(row.matricula) || (cpfKey && byCpf.get(cpfKey)) || (emailKey && byEmail.get(emailKey));
+          // Demitido só inativa quem tem a MESMA matrícula. Casar por CPF/e-mail inativava o
+          // cadastro atual de quem teve um contrato antigo encerrado com outra matrícula
+          // (ex: demitido em 2015 e readmitido depois).
+          const existing = byMatricula.get(row.matricula);
 
           // Ignora se não existe, se já está inativo ou se a mesma pessoa aparece ativa na planilha
           // com outra matrícula (ex: temporário demitido + efetivo ativo, ou contratos antigos
